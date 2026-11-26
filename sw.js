@@ -3,7 +3,7 @@
 // - Topokart fra Kartverket hentes fra lageret først (offline-kart), og nye kartbiter lagres når de lastes.
 // - Alt annet (posisjoner, meldinger, vær, flyfoto) går rett mot nettet.
 
-const APP = 'jakt-app-v1';
+const APP = 'jakt-app-v2';
 const KART = 'jakt-kart';
 const APPFILER = [
   './', 'index.html', 'manifest.json', 'ikon-180.png', 'ikon-192.png', 'ikon-512.png',
@@ -69,4 +69,29 @@ self.addEventListener('fetch', e => {
       return svar;
     })));
   }
+});
+
+// ----- Push-varsler -----
+self.addEventListener('push', e => {
+  let d = {};
+  try { d = e.data.json(); } catch (_) { d = { tittel: 'Jaktlaget', tekst: e.data ? e.data.text() : '' }; }
+  e.waitUntil(self.registration.showNotification(d.tittel || 'Jaktlaget', {
+    body: d.tekst || '',
+    icon: 'ikon-192.png',
+    badge: 'ikon-192.png',
+    tag: (d.uttak ? 'uttak-' : 'melding-') + (d.lag || ''),
+    renotify: true,
+    requireInteraction: !!d.uttak,
+    vibrate: d.uttak ? [400, 150, 400, 150, 400] : [200],
+    data: { url: './?lag=' + encodeURIComponent(d.lag || '') }
+  }));
+});
+self.addEventListener('notificationclick', e => {
+  e.notification.close();
+  const url = new URL(e.notification.data && e.notification.data.url || './', self.registration.scope).href;
+  e.waitUntil(self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then(liste => {
+    const finnes = liste.find(c => c.url.startsWith(self.registration.scope));
+    if (finnes) { finnes.navigate(url).catch(() => {}); return finnes.focus(); }
+    return self.clients.openWindow(url);
+  }));
 });

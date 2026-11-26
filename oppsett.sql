@@ -142,3 +142,47 @@ do $$ begin
   end if;
 end $$;
 notify pgrst, 'reload schema';
+
+-- ===== Versjon 5: push-varsler =====
+create table if not exists public.jakt_push (
+  endpoint   text not null,
+  lag        text not null,
+  medlem_id  uuid not null,
+  abonnement jsonb not null,
+  meldinger  boolean not null default true,
+  oppdatert  timestamptz not null default now(),
+  primary key (endpoint, lag)
+);
+alter table public.jakt_push enable row level security;
+revoke all on public.jakt_push from anon, authenticated;
+
+create or replace function public.jakt_lagre_push(p_endpoint text, p_lag text, p_medlem uuid, p_abonnement jsonb, p_meldinger boolean)
+returns void language sql security definer set search_path = public as $$
+  insert into jakt_push (endpoint, lag, medlem_id, abonnement, meldinger, oppdatert)
+  values (p_endpoint, p_lag, p_medlem, p_abonnement, p_meldinger, now())
+  on conflict (endpoint, lag) do update
+    set medlem_id = excluded.medlem_id, abonnement = excluded.abonnement,
+        meldinger = excluded.meldinger, oppdatert = now();
+$$;
+create or replace function public.jakt_slett_push(p_endpoint text, p_lag text)
+returns void language sql security definer set search_path = public as $$
+  delete from jakt_push where endpoint = p_endpoint and lag = p_lag;
+$$;
+grant execute on function public.jakt_lagre_push(text, text, uuid, jsonb, boolean) to anon, authenticated;
+grant execute on function public.jakt_slett_push(text, text) to anon, authenticated;
+
+create extension if not exists pg_net with schema extensions;
+create or replace function public.jakt_varsle() returns trigger
+language plpgsql security definer set search_path = public as $$
+begin
+  perform net.http_post(
+    url := 'https://hmutcnvixydixymfldut.supabase.co/functions/v1/jakt-varsel',
+    body := to_jsonb(new),
+    headers := jsonb_build_object('Content-Type', 'application/json', 'x-jakt-hemmelig', 'HEMMELIG_HER')
+  );
+  return new;
+end $$;
+drop trigger if exists jakt_meldinger_varsel on public.jakt_meldinger;
+create trigger jakt_meldinger_varsel after insert on public.jakt_meldinger
+  for each row execute function public.jakt_varsle();
+notify pgrst, 'reload schema';
