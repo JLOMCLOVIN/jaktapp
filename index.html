@@ -261,6 +261,13 @@ function visAlle() {
 // ----- Avstandsringer rundt egen posisjon -----
 const ringGruppe = L.layerGroup();
 const ringSirkler = RINGER_M.map(r => L.circle([0, 0], { radius: r, color: '#fff', weight: 2, fill: false, interactive: false }));
+// Hvite ringer på flyfoto, mørke på topokart
+function ringFarge() {
+  const påFlyfoto = kart.hasLayer(flyfoto);
+  ringSirkler.forEach(c => c.setStyle({ color: påFlyfoto ? '#fff' : '#333', weight: påFlyfoto ? 2 : 1.5 }));
+}
+ringFarge();
+kart.on('baselayerchange', ringFarge);
 const ringTekster = RINGER_M.map(r => L.marker([0, 0], { interactive: false, keyboard: false,
   icon: L.divIcon({ className: 'ringtekst', iconSize: [60, 16], iconAnchor: [30, 0], html: `<div>${r} m</div>` }) }));
 ringSirkler.forEach(c => ringGruppe.addLayer(c));
