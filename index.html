@@ -209,6 +209,12 @@
     </div>
     <h3>Med i laget</h3>
     <div id="medlemmer"></div>
+    <h3>Offline-kart</h3>
+    <div class="hint" id="offlineInfo">Last ned topokartet for jaktområdet på wifi før dere drar. Da virker kartet uten dekning.</div>
+    <div class="lagknapper">
+      <button class="hoved" id="btnLastNed">Last ned kart</button>
+      <button id="btnSlettKart">Slett offline-kart</button>
+    </div>
     <div id="installer"></div>
     <div class="lagknapper" style="grid-template-columns:1fr">
       <button id="btnForlat" style="background:none;color:#b00">Forlat jaktlaget</button>
@@ -309,8 +315,11 @@ while (!mittNavn) {
 
 const kart = L.map('kart', { zoomControl: false }).setView([60.0, 11.0], 13);
 window.addEventListener('resize', () => kart.invalidateSize());
-const topo = L.tileLayer('https://cache.kartverket.no/v1/wmts/1.0.0/topo/default/webmercator/{z}/{y}/{x}.png', {
-  maxZoom: 18, attribution: '&copy; Kartverket'
+const TOPO_URL = 'https://cache.kartverket.no/v1/wmts/1.0.0/topo/default/webmercator/{z}/{y}/{x}.png';
+const OFFLINE_MAKS_ZOOM = 16;
+// Uten dekning brukes nedlastede kartbiter (til zoom 16), forstørret ved mer innzoom
+const topo = L.tileLayer(TOPO_URL, {
+  maxZoom: 18, maxNativeZoom: navigator.onLine ? 18 : OFFLINE_MAKS_ZOOM, attribution: '&copy; Kartverket'
 });
 // Norge i bilder krever innlogging (token), så flyfoto hentes fra Esri World Imagery
 const flyfoto = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
@@ -350,6 +359,7 @@ statusEl.onclick = () => {
   chatEl.classList.remove('åpen');
   lagetEl.classList.add('åpen');
   visMedlemmer();
+  if (!lasterNed) visOfflineInfo();
 };
 document.getElementById('btnLukkLaget').onclick = () => lagetEl.classList.remove('åpen');
 document.getElementById('btnOppdater').onclick = () => location.reload();
@@ -560,7 +570,13 @@ kart.addControl(new VindKnapp());
 setInterval(() => hentVind(true), 20 * 60000);
 
 async function hentLag() {
-  const { data } = await db.from(LAGTABELL).select('navn, grense').eq('slug', lag).maybeSingle();
+  let data = null;
+  try {
+    const svar = await db.from(LAGTABELL).select('navn, grense').eq('slug', lag).maybeSingle();
+    data = svar.data;
+    if (data) localStorage.setItem('jakt_lagdata_' + lag, JSON.stringify(data));
+  } catch (e) { /* uten dekning */ }
+  if (!data) { try { data = JSON.parse(localStorage.getItem('jakt_lagdata_' + lag)); } catch (e) {} }
   if (!data) return;
   lagNavn = data.navn || lag;
   document.title = 'Jaktlaget ' + lagNavn;
@@ -765,6 +781,100 @@ document.getElementById('btnUttak').onclick = async () => {
     lagreHund({ lat: p.lat, lng: p.lng, hos_medlem: null });   // hunden er der uttaket er
   }, 'Ferdig', 120);
 };
+
+
+// ----- Offline-kart -----
+const KARTLAGER = 'jakt-kart';
+function tilTile(lat, lng, z) {
+  const n = 2 ** z;
+  return [Math.floor((lng + 180) / 360 * n),
+          Math.floor((1 - Math.asinh(Math.tan(lat * Math.PI / 180)) / Math.PI) / 2 * n)];
+}
+function tileHjørner(x, y, z) {
+  const n = 2 ** z, lng = v => v / n * 360 - 180;
+  const lat = v => Math.atan(Math.sinh(Math.PI * (1 - 2 * v / n))) * 180 / Math.PI;
+  return [[lat(y), lng(x)], [lat(y), lng(x + 1)], [lat(y + 1), lng(x)], [lat(y + 1), lng(x + 1)], [lat(y + 0.5), lng(x + 0.5)]];
+}
+function iPolygon(pt, ringer) {   // pt = [lat, lng], ringer = GeoJSON-ringer [[lng, lat], ...]
+  let inne = false;
+  for (const r of ringer) for (let i = 0, j = r.length - 1; i < r.length; j = i++) {
+    const [xi, yi] = r[i], [xj, yj] = r[j];
+    if ((yi > pt[0]) !== (yj > pt[0]) && pt[1] < (xj - xi) * (pt[0] - yi) / (yj - yi) + xi) inne = !inne;
+  }
+  return inne;
+}
+function kartbiter() {
+  // Innenfor jaktgrensa hvis den finnes, ellers området som vises på skjermen nå
+  let b, ringer = null;
+  if (grenseLag) {
+    b = grenseLag.getBounds();
+    const geo = grenseLag.toGeoJSON().features[0].geometry;
+    ringer = geo.type === 'Polygon' ? geo.coordinates : geo.coordinates.flat();
+  } else b = kart.getBounds();
+  const liste = [];
+  for (let z = 8; z <= OFFLINE_MAKS_ZOOM; z++) {
+    const [x0, y0] = tilTile(b.getNorth(), b.getWest(), z), [x1, y1] = tilTile(b.getSouth(), b.getEast(), z);
+    for (let x = x0; x <= x1; x++) for (let y = y0; y <= y1; y++) {
+      if (ringer && z >= 13 && !tileHjørner(x, y, z).some(p => iPolygon(p, ringer))) continue;
+      liste.push(TOPO_URL.replace('{z}', z).replace('{x}', x).replace('{y}', y));
+    }
+  }
+  return liste;
+}
+async function visOfflineInfo(tekst) {
+  const el = document.getElementById('offlineInfo');
+  if (tekst) { el.textContent = tekst; return; }
+  if (!('caches' in window)) { el.textContent = 'Denne nettleseren støtter ikke offline-kart.'; return; }
+  const c = await caches.open(KARTLAGER);
+  const antall = (await c.keys()).length;
+  const område = grenseLag ? 'jaktgrensa' : 'området som vises på skjermen';
+  el.textContent = (antall ? `${antall} kartbiter er lagret på telefonen. ` : 'Ingen kart er lagret ennå. ') +
+    `Nedlastingen tar med topokartet innenfor ${område}, ca. ${kartbiter().length} kartbiter. Gjør det på wifi før dere drar.`;
+}
+let lasterNed = false;
+document.getElementById('btnLastNed').onclick = async () => {
+  if (lasterNed || !('caches' in window)) return;
+  if (!navigator.onLine) { visOfflineInfo('Du er uten nett nå. Prøv igjen når du har dekning.'); return; }
+  const liste = kartbiter();
+  if (liste.length > 15000 && !confirm(`Området er stort (${liste.length} kartbiter). Fortsette?`)) return;
+  lasterNed = true;
+  const knapp = document.getElementById('btnLastNed');
+  if (navigator.storage && navigator.storage.persist) navigator.storage.persist().catch(() => {});
+  const c = await caches.open(KARTLAGER);
+  let ferdig = 0, feil = 0, i = 0;
+  async function arbeider() {
+    while (i < liste.length) {
+      const url = liste[i++];
+      try {
+        if (!(await c.match(url))) {
+          const svar = await fetch(url, { mode: 'cors' });
+          if (svar.ok) await c.put(url, svar); else feil++;
+        }
+      } catch (e) { feil++; }
+      ferdig++;
+      if (ferdig % 25 === 0 || ferdig === liste.length) {
+        knapp.textContent = `Laster ned … ${Math.round(ferdig / liste.length * 100)} %`;
+      }
+    }
+  }
+  await Promise.all(Array.from({ length: 6 }, arbeider));
+  lasterNed = false;
+  knapp.textContent = 'Last ned kart';
+  let mb = '';
+  if (navigator.storage && navigator.storage.estimate) {
+    const est = await navigator.storage.estimate();
+    mb = ` Appen bruker nå ca. ${Math.round(est.usage / 1048576)} MB.`;
+  }
+  visOfflineInfo(feil ? `Ferdig, men ${feil} kartbiter feilet. Trykk «Last ned kart» igjen for å hente resten.` + mb
+                      : `Ferdig! Kartet for ${grenseLag ? 'jaktområdet' : 'utsnittet'} er lagret og virker uten dekning, ned til zoomnivå ${OFFLINE_MAKS_ZOOM}.` + mb);
+};
+document.getElementById('btnSlettKart').onclick = async () => {
+  if (!confirm('Slette alle lagrede kartbiter?')) return;
+  await caches.delete(KARTLAGER);
+  visOfflineInfo();
+};
+window.addEventListener('offline', () => settStatus('Uten dekning · viser lagret kart'));
+window.addEventListener('online', () => { oppdaterTider(); hentAlle(); hentMeldinger(); });
 
 // ----- Sanntid -----
 function lyttPåEndringer() {
