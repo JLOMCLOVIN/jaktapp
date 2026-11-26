@@ -80,3 +80,24 @@ do $$ begin
 end $$;
 
 notify pgrst, 'reload schema';
+
+-- ===== Versjon 3: medlemmer i jaktlaget =====
+create table if not exists public.jakt_medlemmer (
+  lag        text not null,
+  medlem_id  uuid not null,
+  navn       text not null,
+  sist_aktiv timestamptz not null default now(),
+  primary key (lag, medlem_id)
+);
+create index if not exists jakt_medlemmer_medlem_idx on public.jakt_medlemmer (medlem_id);
+alter table public.jakt_medlemmer enable row level security;
+drop policy if exists "jakt_medlemmer lesing"   on public.jakt_medlemmer;
+drop policy if exists "jakt_medlemmer innmelding" on public.jakt_medlemmer;
+drop policy if exists "jakt_medlemmer endring"  on public.jakt_medlemmer;
+drop policy if exists "jakt_medlemmer utmelding" on public.jakt_medlemmer;
+create policy "jakt_medlemmer lesing"     on public.jakt_medlemmer for select to anon, authenticated using (true);
+create policy "jakt_medlemmer innmelding" on public.jakt_medlemmer for insert to anon, authenticated with check (true);
+create policy "jakt_medlemmer endring"    on public.jakt_medlemmer for update to anon, authenticated using (true) with check (true);
+create policy "jakt_medlemmer utmelding"  on public.jakt_medlemmer for delete to anon, authenticated using (true);
+grant select, insert, update, delete on public.jakt_medlemmer to anon, authenticated;
+notify pgrst, 'reload schema';

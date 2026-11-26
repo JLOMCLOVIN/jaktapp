@@ -5,6 +5,13 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
 <meta name="theme-color" content="#2f3b2a">
 <title>Jaktlaget</title>
+<link rel="manifest" href="manifest.json">
+<link rel="apple-touch-icon" href="ikon-180.png">
+<link rel="icon" href="ikon-192.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Jaktlaget">
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
 <style>
   html, body { margin: 0; height: 100%; font-family: -apple-system, system-ui, sans-serif; }
@@ -55,12 +62,38 @@
   .knapp-ring a { font-size: 12px !important; font-weight: 700; width: auto !important; padding: 0 8px; }
   .knapp-ring a.på { background: #e07a1f; color: #fff; }
   #vind {
-    position: absolute; top: 46px; left: 50%; transform: translateX(-50%); z-index: 1000;
-    background: rgba(255,255,255,.92); color: #222; padding: 4px 10px; border-radius: 12px;
-    font-size: 12px; font-weight: 600; white-space: nowrap; display: none; align-items: center; gap: 6px;
-    box-shadow: 0 1px 4px rgba(0,0,0,.3);
+    position: absolute; top: 44px; left: 50%; transform: translateX(-50%); z-index: 1000;
+    background: rgba(255,255,255,.85); color: #222; padding: 2px 8px; border-radius: 10px;
+    font-size: 11px; font-weight: 600; white-space: nowrap; display: none; align-items: center; gap: 4px;
   }
-  #vind .pil { display: inline-block; font-size: 15px; line-height: 1; }
+  #vind .pil { display: inline-block; font-size: 13px; line-height: 1; }
+  #status { top: max(10px, env(safe-area-inset-top)); }
+  #status::after { content: ' ▾'; opacity: .7; }
+
+  /* Lagmeny */
+  #laget {
+    position: absolute; left: 0; right: 0; top: 0; bottom: 0; z-index: 1150;
+    background: #fff; display: none; flex-direction: column; overflow-y: auto;
+    padding: max(12px, env(safe-area-inset-top)) 16px 16px; box-sizing: border-box;
+  }
+  #laget.åpen { display: flex; }
+  #laget h2 { margin: 4px 0 2px; font-size: 20px; display: flex; align-items: center; }
+  #laget h2 button { margin-left: auto; border: 0; background: none; font-size: 26px; line-height: 1; padding: 0 4px; }
+  #laget h3 { margin: 18px 0 6px; font-size: 13px; text-transform: uppercase; letter-spacing: .04em; color: #666; }
+  .lagknapper { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 10px; }
+  .lagknapper button, .mine a {
+    border: 0; border-radius: 8px; padding: 11px 8px; font-size: 14px; font-weight: 600;
+    background: #eef0ea; color: #222; text-decoration: none; text-align: center; font-family: inherit;
+  }
+  .lagknapper button.hoved { background: #2f3b2a; color: #fff; }
+  .medlem { display: flex; align-items: center; gap: 8px; padding: 8px 0; border-bottom: 1px solid #eee; font-size: 15px; }
+  .medlem .prikk { width: 10px; height: 10px; border-radius: 50%; background: #bbb; flex: none; }
+  .medlem .prikk.aktiv { background: #2e9e44; }
+  .medlem .info { margin-left: auto; font-size: 12px; color: #777; }
+  .hint { font-size: 13px; color: #555; line-height: 1.45; background: #f6f6f2; border-radius: 8px; padding: 10px; }
+  .mine { display: flex; flex-direction: column; gap: 8px; }
+  .mine a { text-align: left; display: flex; justify-content: space-between; }
+  .mine a span { font-weight: 400; color: #777; font-size: 12px; }
 
   /* Chat */
   #chat {
@@ -96,7 +129,11 @@
 <div id="start">
   <h1>Jaktlaget</h1>
   <p>Se hvor de andre i jaktlaget er. Opprett et jaktlag og del lenken med laget.</p>
-  <label for="nyttLag">Navn på jaktlaget</label>
+  <div id="mineLagBoks" style="display:none">
+    <label>Dine jaktlag</label>
+    <div class="mine" id="mineLag"></div>
+  </div>
+  <label for="nyttLag">Opprett nytt jaktlag</label>
   <input id="nyttLag" placeholder="For eksempel Lordalen elgjakt" maxlength="60">
   <button id="btnOpprett">Opprett jaktlag</button>
   <p id="startFeil"></p>
@@ -114,6 +151,21 @@
       <input id="chatTekst" placeholder="Skriv en melding" maxlength="1000">
       <button type="submit">Send</button>
     </form>
+  </div>
+  <div id="laget">
+    <h2><span id="lagTittel">Jaktlaget</span><button id="btnLukkLaget" aria-label="Lukk">×</button></h2>
+    <div class="lagknapper">
+      <button class="hoved" id="btnDel">Del lenke</button>
+      <button id="btnOppdater">Oppdater siden</button>
+      <button id="btnNavn">Bytt navn</button>
+      <a href="./?velg=1" style="display:block;border-radius:8px;padding:11px 8px;background:#eef0ea;color:#222;text-decoration:none;text-align:center;font-weight:600;font-size:14px">Mine jaktlag</a>
+    </div>
+    <h3>Med i laget</h3>
+    <div id="medlemmer"></div>
+    <div id="installer"></div>
+    <div class="lagknapper" style="grid-template-columns:1fr">
+      <button id="btnForlat" style="background:none;color:#b00">Forlat jaktlaget</button>
+    </div>
   </div>
   </div>
   <div id="meny">
@@ -156,8 +208,14 @@ const lag = new URLSearchParams(location.search).get('lag');
 function escape(s) { return String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
 
 // ---------- Startside: opprett jaktlag ----------
-if (!lag) {
+const sistLag = localStorage.getItem('jakt_sist_lag');
+const somApp = window.matchMedia('(display-mode: standalone)').matches || navigator.standalone;
+if (!lag && somApp && sistLag && !new URLSearchParams(location.search).has('velg')) {
+  // Installert app åpner sist brukte jaktlag direkte
+  location.replace('./?lag=' + encodeURIComponent(sistLag));
+} else if (!lag) {
   document.getElementById('start').style.display = 'block';
+  visMineLag();
   document.getElementById('btnOpprett').onclick = async () => {
     const navn = document.getElementById('nyttLag').value.trim();
     const feil = document.getElementById('startFeil');
@@ -174,9 +232,25 @@ if (!lag) {
   startKart();
 }
 
+async function visMineLag() {
+  const id = localStorage.getItem('jakt_id');
+  if (!id) return;
+  const { data: medl } = await db.from('jakt_medlemmer').select('lag, sist_aktiv').eq('medlem_id', id).order('sist_aktiv', { ascending: false });
+  if (!medl || !medl.length) return;
+  const { data: lagene } = await db.from(LAGTABELL).select('slug, navn').in('slug', medl.map(m => m.lag));
+  const navn = Object.fromEntries((lagene || []).map(l => [l.slug, l.navn]));
+  document.getElementById('mineLag').innerHTML = medl.map(m =>
+    `<a href="?lag=${encodeURIComponent(m.lag)}">${escape(navn[m.lag] || m.lag)}<span>${new Date(m.sist_aktiv).toLocaleDateString('no', { day: 'numeric', month: 'short' })}</span></a>`).join('');
+  document.getElementById('mineLagBoks').style.display = 'block';
+}
+
+// Service worker gjør at siden kan installeres som app
+if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js').catch(() => {});
+
 // ---------- Kartvisning ----------
 function startKart() {
 document.getElementById('app').style.display = 'flex';
+localStorage.setItem('jakt_sist_lag', lag);
 
 let minId = localStorage.getItem('jakt_id');
 if (!minId) { minId = (crypto.randomUUID ? crypto.randomUUID() : 'xxxxxxxx-xxxx-4xxx-8xxx-xxxxxxxxxxxx'.replace(/x/g, () => (Math.random() * 16 | 0).toString(16))); localStorage.setItem('jakt_id', minId); }
@@ -203,13 +277,64 @@ kart.on('baselayerchange', e => localStorage.setItem('jakt_kartlag', e.layer ===
 const statusEl = document.getElementById('status');
 const settStatus = t => statusEl.textContent = t;
 let lagNavn = lag;
-statusEl.onclick = async () => {
+// ----- Medlemskap og lagmeny -----
+async function meldInn() {
+  await db.from('jakt_medlemmer').upsert({ lag, medlem_id: minId, navn: mittNavn, sist_aktiv: new Date().toISOString() });
+}
+const lagetEl = document.getElementById('laget');
+function siden(ts) {
+  const m = minutterSiden(ts);
+  if (m < 2) return 'nå';
+  if (m < 60) return m + ' min siden';
+  if (m < 48 * 60) return Math.floor(m / 60) + ' t siden';
+  return Math.floor(m / 1440) + ' dager siden';
+}
+async function visMedlemmer() {
+  const { data } = await db.from('jakt_medlemmer').select('medlem_id, navn, sist_aktiv').eq('lag', lag).order('navn');
+  document.getElementById('medlemmer').innerHTML = (data || []).map(m => {
+    const j = jegere[m.medlem_id];
+    const deler = j && minutterSiden(j.data.oppdatert) < GAMMEL_ETTER_MIN;
+    const info = deler ? 'deler posisjon' : (j ? 'posisjon ' + siden(j.data.oppdatert) : 'sist innom ' + siden(m.sist_aktiv));
+    return `<div class="medlem"><span class="prikk${deler ? ' aktiv' : ''}"></span>${escape(m.navn)}${m.medlem_id === minId ? ' (deg)' : ''}<span class="info">${info}</span></div>`;
+  }).join('') || '<div class="medlem">Ingen ennå</div>';
+}
+statusEl.onclick = () => {
+  document.getElementById('lagTittel').textContent = lagNavn;
+  chatEl.classList.remove('åpen');
+  lagetEl.classList.add('åpen');
+  visMedlemmer();
+};
+document.getElementById('btnLukkLaget').onclick = () => lagetEl.classList.remove('åpen');
+document.getElementById('btnOppdater').onclick = () => location.reload();
+document.getElementById('btnDel').onclick = async () => {
   const lenke = location.origin + location.pathname + '?lag=' + encodeURIComponent(lag);
   try {
-    if (navigator.share) await navigator.share({ title: 'Jaktlaget ' + lagNavn, url: lenke });
-    else { await navigator.clipboard.writeText(lenke); settStatus('Lenken er kopiert'); setTimeout(oppdaterTider, 2000); }
+    if (navigator.share) await navigator.share({ title: 'Jaktlaget ' + lagNavn, text: 'Bli med i jaktlaget ' + lagNavn, url: lenke });
+    else { await navigator.clipboard.writeText(lenke); document.getElementById('btnDel').textContent = 'Lenken er kopiert'; }
   } catch (e) { /* avbrutt */ }
 };
+document.getElementById('btnNavn').onclick = async () => {
+  const nytt = (prompt('Hva vil du hete?', mittNavn) || '').trim();
+  if (!nytt || nytt === mittNavn) return;
+  mittNavn = nytt; localStorage.setItem('jakt_navn', nytt);
+  await meldInn();
+  if (minPos && deler) sendPosisjon(minPos, true);
+  visMedlemmer();
+};
+document.getElementById('btnForlat').onclick = async () => {
+  if (!confirm('Forlate jaktlaget ' + lagNavn + '? Du kan bli med igjen via lenken.')) return;
+  await db.from(TABELL).delete().eq('id', minId);
+  await db.from('jakt_medlemmer').delete().eq('lag', lag).eq('medlem_id', minId);
+  localStorage.removeItem('jakt_sist_lag');
+  location.href = './?velg=1';
+};
+const erInstallert = window.matchMedia('(display-mode: standalone)').matches || navigator.standalone;
+if (!erInstallert) {
+  const iOS = /iPhone|iPad|iPod/.test(navigator.userAgent);
+  document.getElementById('installer').innerHTML = `<h3>Installer som app</h3><div class="hint">${iOS
+    ? 'I Safari: trykk Del-knappen (firkant med pil opp), og velg <b>Legg til på Hjem-skjerm</b>. Da åpnes kartet i fullskjerm uten adresselinje.'
+    : 'I Chrome: trykk menyen ⋮ og velg <b>Installer app</b> eller <b>Legg til på startskjermen</b>. Da åpnes kartet i fullskjerm.'}</div>`;
+}
 
 const jegere = {};   // id -> { data, markør }
 let minPos = null, sistSendt = null, sistSendtTid = 0, deler = true, førsteVisning = true;
@@ -338,8 +463,7 @@ function visVind() {
   const medvind = (vind.fra + 180) % 360;
   const kl = new Date(vind.tid).toLocaleTimeString('no', { hour: '2-digit', minute: '2-digit' });
   vindEl.innerHTML = `<span class="pil" style="transform: rotate(${medvind}deg)">↑</span>` +
-    `Vind ${vind.fart.toFixed(1).replace('.', ',')} m/s fra ${retningTekst(vind.fra)}` +
-    (vind.kast ? ` (kast ${vind.kast.toFixed(0)})` : '') + ` · ${kl}`;
+    `${vind.fart.toFixed(1).replace('.', ',')} m/s · ${kl}`;
   vindEl.style.display = vindPå ? 'flex' : 'none';
 }
 async function hentVind(tving) {
@@ -506,7 +630,7 @@ function startPosisjon() {
 // Send med en gang når telefonen tas opp igjen
 document.addEventListener('visibilitychange', () => {
   if (document.visibilityState === 'visible') {
-    hentAlle(); hentMeldinger();
+    hentAlle(); hentMeldinger(); meldInn();
     if (minPos) sendPosisjon(minPos, true);
     if (wakeLock === 'ønsket') slåPåSkjerm();
   }
@@ -553,6 +677,7 @@ btnStopp.onclick = async () => {
 
 setInterval(oppdaterTider, 30000);
 hentLag();
+meldInn();
 lyttPåEndringer();
 startPosisjon();
 }
