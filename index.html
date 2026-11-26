@@ -411,8 +411,12 @@ function ikon(d) {
   if (minutterSiden(d.oppdatert) >= GAMMEL_ETTER_MIN) klasser.push('gammel');
   return L.divIcon({
     className: klasser.join(' '), iconSize: [120, 40], iconAnchor: [60, 8],
-    html: `<div class="prikk"></div><div class="navn">${escape(d.navn)} <span class="tid">${tidTekst(d.oppdatert)}</span></div>`
+    html: `<div class="prikk"></div><div class="navn">${escape(d.navn)}${harHund(d.id) ? ' 🐕' : ''} <span class="tid">${tidTekst(d.oppdatert)}</span></div>`
   });
+}
+// Er hunden hos denne jegeren? Da vises hunden som 🐕 ved navnet i stedet for egen markør.
+function harHund(id) {
+  return typeof hundData !== 'undefined' && Object.values(hundData).some(h => h.hos_medlem === id);
 }
 
 function visJeger(d) {
@@ -648,7 +652,8 @@ document.getElementById('chatSkjema').onsubmit = async e => {
 
 
 // ----- Hund og uttak -----
-const hunder = {};      // hundenavn -> { data, markør }
+const hunder = {};      // hundenavn -> { data, markør } for hunder med egen markør
+var hundData = {};      // hundenavn -> rad fra databasen
 const uttak = {};       // id -> markør
 const VIS_UTTAK_TIMER = 12;
 const arkEl = document.getElementById('ark');
@@ -691,16 +696,24 @@ function hundIkon(d) {
   return L.divIcon({ className: 'hundikon', iconSize: [160, 50], iconAnchor: [80, 18],
     html: `<div class="merke2">🐕</div><div class="navn">${escape(d.hund)}${hos}</div>` });
 }
+function oppdaterJegerikoner() { Object.values(jegere).forEach(j => j.markør.setIcon(ikon(j.data))); }
 function visHund(d) {
   if (!d || d.lag !== lag) return;
-  const pos = hundPos(d);
+  const før = hundData[d.hund];
+  hundData[d.hund] = d;
+  if (!før || før.hos_medlem !== d.hos_medlem) oppdaterJegerikoner();
+  // Hunden hos en jeger som vises på kartet: ingen egen markør
+  const pos = (d.hos_medlem && jegere[d.hos_medlem]) ? null : hundPos(d);
   const finnes = hunder[d.hund];
   if (!pos) { if (finnes) { kart.removeLayer(finnes.markør); delete hunder[d.hund]; } return; }
   if (finnes) { finnes.data = d; finnes.markør.setLatLng(pos).setIcon(hundIkon(d)); }
   else hunder[d.hund] = { data: d, markør: L.marker(pos, { icon: hundIkon(d), zIndexOffset: 500 }).addTo(kart) };
 }
-function fjernHund(navn) { if (hunder[navn]) { kart.removeLayer(hunder[navn].markør); delete hunder[navn]; } }
-function oppdaterHunder() { Object.values(hunder).forEach(h => visHund(h.data)); }
+function fjernHund(navn) {
+  if (hunder[navn]) { kart.removeLayer(hunder[navn].markør); delete hunder[navn]; }
+  if (hundData[navn]) { delete hundData[navn]; oppdaterJegerikoner(); }
+}
+function oppdaterHunder() { Object.values(hundData).forEach(visHund); }
 async function hentHunder() {
   const { data } = await db.from('jakt_hunder').select('*').eq('lag', lag);
   (data || []).forEach(visHund);
@@ -718,7 +731,7 @@ document.getElementById('btnHund').onclick = () => {
   visArk(`<h3>Hund</h3>
     <button class="hoved" id="arkHer">Hunden er her (trykk i kartet)</button>
     <button id="arkHosMeg">Hunden er hos meg</button>
-    ${hunder[HUND] ? '<button id="arkFjern">Fjern hunden fra kartet</button>' : ''}
+    ${hundData[HUND] ? '<button id="arkFjern">Fjern hunden fra kartet</button>' : ''}
     <button class="avbryt" id="arkAvbryt">Avbryt</button>`);
   document.getElementById('arkAvbryt').onclick = lukkArk;
   document.getElementById('arkHer').onclick = () =>
