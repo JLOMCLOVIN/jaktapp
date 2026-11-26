@@ -602,9 +602,12 @@ function visMelding(m, ny) {
   div.innerHTML = `<div class="hvem">${min ? '' : escape(m.navn) + ' · '}${klokke(m.sendt)}</div><div class="tekst">${escape(m.tekst)}</div>`;
   meldingerEl.appendChild(div);
   meldingerEl.scrollTop = meldingerEl.scrollHeight;
+  if (ny && !min && m.tekst.startsWith('Uttak!')) {
+    varsleUttak('Uttak! ' + m.navn + ' ' + klokke(m.sendt));
+  }
   if (ny && !min && !chatEl.classList.contains('åpen')) {
     ulest++; ulestEl.textContent = ulest;
-    if (navigator.vibrate) navigator.vibrate(200);
+    if (navigator.vibrate && !m.tekst.startsWith('Uttak!')) navigator.vibrate(200);
   }
 }
 async function hentMeldinger() {
@@ -638,15 +641,20 @@ let velgHandler = null;
 
 function lukkArk() { arkEl.classList.remove('åpen'); }
 function visArk(html) { chatEl.classList.remove('åpen'); arkEl.innerHTML = html; arkEl.classList.add('åpen'); }
-function velgPunkt(tekst, ferdig) {
+let velgTidsavbrudd = null;
+function velgPunkt(tekst, ferdig, knappTekst, sekunder) {
   lukkArk();
   document.getElementById('velgTekst').textContent = tekst;
+  document.getElementById('btnAvbrytPunkt').textContent = knappTekst || 'Avbryt';
   velgEl.style.display = 'flex';
+  clearTimeout(velgTidsavbrudd);
+  if (sekunder) velgTidsavbrudd = setTimeout(avbrytVelg, sekunder * 1000);
   if (velgHandler) kart.off('click', velgHandler);
   velgHandler = e => { avbrytVelg(); ferdig(e.latlng); };
   kart.on('click', velgHandler);
 }
 function avbrytVelg() {
+  clearTimeout(velgTidsavbrudd);
   velgEl.style.display = 'none';
   if (velgHandler) { kart.off('click', velgHandler); velgHandler = null; }
 }
@@ -682,62 +690,45 @@ async function hentHunder() {
   (data || []).forEach(visHund);
 }
 
-function velgHundenavn() {
-  const navn = Object.keys(hunder);
-  const sist = localStorage.getItem('jakt_hund') || navn[0] || 'Hunden';
-  const svar = (prompt('Hvilken hund?' + (navn.length ? ' (på kartet nå: ' + navn.join(', ') + ')' : ''), sist) || '').trim();
-  if (svar) localStorage.setItem('jakt_hund', svar);
-  return svar;
-}
+const HUND = 'Hunden';
 async function lagreHund(rad) {
-  const { error } = await db.from('jakt_hunder').upsert({ lag, satt_av: mittNavn, oppdatert: new Date().toISOString(), ...rad });
+  const full = { lag, hund: HUND, satt_av: mittNavn, oppdatert: new Date().toISOString(), ...rad };
+  const { error } = await db.from('jakt_hunder').upsert(full);
   if (error) settStatus('Fikk ikke lagret hunden: ' + error.message);
-  else visHund({ lag, satt_av: mittNavn, oppdatert: new Date().toISOString(), ...rad });
+  else visHund(full);
 }
 
 document.getElementById('btnHund').onclick = () => {
-  const navn = Object.keys(hunder);
   visArk(`<h3>Hund</h3>
     <button class="hoved" id="arkHer">Hunden er her (trykk i kartet)</button>
     <button id="arkHosMeg">Hunden er hos meg</button>
-    ${navn.length ? '<button id="arkFjern">Fjern hund fra kartet</button>' : ''}
+    ${hunder[HUND] ? '<button id="arkFjern">Fjern hunden fra kartet</button>' : ''}
     <button class="avbryt" id="arkAvbryt">Avbryt</button>`);
   document.getElementById('arkAvbryt').onclick = lukkArk;
-  document.getElementById('arkHer').onclick = () => {
-    const hund = velgHundenavn(); if (!hund) return;
-    velgPunkt('Trykk i kartet der ' + hund + ' er', p => lagreHund({ hund, lat: p.lat, lng: p.lng, hos_medlem: null }));
-  };
+  document.getElementById('arkHer').onclick = () =>
+    velgPunkt('Trykk i kartet der hunden er', p => lagreHund({ lat: p.lat, lng: p.lng, hos_medlem: null }));
   document.getElementById('arkHosMeg').onclick = () => {
-    const hund = velgHundenavn(); if (!hund) return;
     lukkArk();
-    lagreHund({ hund, hos_medlem: minId, lat: minPos ? minPos.lat : null, lng: minPos ? minPos.lng : null });
+    lagreHund({ hos_medlem: minId, lat: minPos ? minPos.lat : null, lng: minPos ? minPos.lng : null });
   };
   const f = document.getElementById('arkFjern');
   if (f) f.onclick = async () => {
-    const hund = navn.length === 1 ? navn[0] : velgHundenavn(); if (!hund) return;
     lukkArk();
-    await db.from('jakt_hunder').delete().eq('lag', lag).eq('hund', hund);
-    fjernHund(hund);
+    await db.from('jakt_hunder').delete().eq('lag', lag).eq('hund', HUND);
+    fjernHund(HUND);
   };
 };
 
 function uttakIkon(h) {
   const t = new Date(h.tid).toLocaleTimeString('no', { hour: '2-digit', minute: '2-digit' });
-  return L.divIcon({ className: 'uttakikon', iconSize: [160, 46], iconAnchor: [80, 16],
-    html: `<div class="merke2">✕</div><div class="navn">Uttak ${t}${h.notat ? ' · ' + escape(h.notat) : ''}</div>` });
+  return L.divIcon({ className: 'uttakikon', iconSize: [120, 46], iconAnchor: [60, 16],
+    html: `<div class="merke2">✕</div><div class="navn">Uttak ${t}</div>` });
 }
-function visUttak(h, ny) {
+function visUttak(h) {
   if (!h || h.lag !== lag || uttak[h.id]) return;
-  if (ny && h.navn !== mittNavn) {
-    // Varsle de andre i laget
-    if (navigator.vibrate) navigator.vibrate([300, 150, 300]);
-    statusEl.style.background = '#b3261e';
-    settStatus('Uttak! ' + (h.notat || '') + ' ' + new Date(h.tid).toLocaleTimeString('no', { hour: '2-digit', minute: '2-digit' }));
-    setTimeout(() => { statusEl.style.background = ''; oppdaterTider(); }, 15000);
-  }
   const m = L.marker([h.lat, h.lng], { icon: uttakIkon(h), zIndexOffset: 400 }).addTo(kart);
   const dato = new Date(h.tid).toLocaleString('no', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
-  m.bindPopup(`<b>Uttak, los i gang</b><br>${escape(h.notat || '')}${h.notat ? '<br>' : ''}Registrert av ${escape(h.navn)}, ${dato}<br><a href="#" data-slett="${h.id}">Slett markøren</a>`);
+  m.bindPopup(`<b>Uttak, los i gang</b><br>Registrert av ${escape(h.navn)}, ${dato}<br><a href="#" data-slett="${h.id}">Slett markøren</a>`);
   m.on('popupopen', e => {
     const a = e.popup.getElement().querySelector('[data-slett]');
     if (a) a.onclick = async ev => {
@@ -753,30 +744,26 @@ function fjernUttak(id) { if (uttak[id]) { kart.removeLayer(uttak[id]); delete u
 async function hentUttak() {
   const fra = new Date(Date.now() - VIS_UTTAK_TIMER * 3600000).toISOString();
   const { data } = await db.from('jakt_hendelser').select('*').eq('lag', lag).gte('tid', fra);
-  (data || []).forEach(visUttak);
+  (data || []).forEach(h => visUttak(h));
 }
-document.getElementById('btnUttak').onclick = () => {
-  visArk(`<h3>Uttak: hunden har funnet vilt</h3>
-    <button class="hoved" id="arkUttakKart" style="background:#b3261e">Marker uttaket i kartet</button>
-    <button id="arkUttakHer">Uttak der jeg står</button>
-    <button class="avbryt" id="arkAvbryt">Avbryt</button>`);
-  document.getElementById('arkAvbryt').onclick = lukkArk;
-  const lagre = async p => {
-    const hund = velgHundenavn();
-    const hva = (prompt('Hva er det los på? (valgfritt, f.eks. elg, ku og kalv)') || '').trim();
-    const notat = [hund, hva].filter(Boolean).join(' · ') || null;
-    const { data, error } = await db.from('jakt_hendelser').insert({ lag, type: 'uttak', lat: p.lat, lng: p.lng, navn: mittNavn, notat }).select().single();
-    if (error) { settStatus('Fikk ikke lagret uttaket: ' + error.message); return; }
-    visUttak(data);
-    // Hunden er der uttaket er
-    if (hund) lagreHund({ hund, lat: p.lat, lng: p.lng, hos_medlem: null });
-  };
-  document.getElementById('arkUttakKart').onclick = () => velgPunkt('Trykk i kartet der uttaket er', lagre);
-  document.getElementById('arkUttakHer').onclick = () => {
-    lukkArk();
-    if (!minPos) { settStatus('Venter på posisjon …'); setTimeout(oppdaterTider, 2500); return; }
-    lagre({ lat: minPos.lat, lng: minPos.lng });
-  };
+function varsleUttak(tekst) {
+  if (navigator.vibrate) navigator.vibrate([300, 150, 300]);
+  statusEl.style.background = '#b3261e';
+  settStatus(tekst);
+  setTimeout(() => { statusEl.style.background = ''; oppdaterTider(); }, 15000);
+}
+// Ett trykk: melding til laget med en gang. Trykk i kartet etterpå markerer stedet.
+document.getElementById('btnUttak').onclick = async () => {
+  lukkArk(); chatEl.classList.remove('åpen');
+  const { data, error } = await db.from(MELDINGER).insert({ lag, avsender_id: minId, navn: mittNavn, tekst: 'Uttak! Los i gang' }).select().single();
+  if (error) { settStatus('Fikk ikke sendt uttak: ' + error.message); return; }
+  visMelding(data, false);
+  velgPunkt('Uttak sendt. Trykk i kartet der uttaket skjedde', async p => {
+    const { data: h, error: feil } = await db.from('jakt_hendelser').insert({ lag, type: 'uttak', lat: p.lat, lng: p.lng, navn: mittNavn }).select().single();
+    if (feil) { settStatus('Fikk ikke lagret stedet: ' + feil.message); return; }
+    visUttak(h);
+    lagreHund({ lat: p.lat, lng: p.lng, hos_medlem: null });   // hunden er der uttaket er
+  }, 'Ferdig', 120);
 };
 
 // ----- Sanntid -----
@@ -792,7 +779,7 @@ function lyttPåEndringer() {
       if (p.eventType === 'DELETE') fjernHund(p.old.hund); else visHund(p.new);
     })
     .on('postgres_changes', { event: '*', schema: 'public', table: 'jakt_hendelser', filter: `lag=eq.${lag}` }, p => {
-      if (p.eventType === 'DELETE') fjernUttak(p.old.id); else visUttak(p.new, p.eventType === 'INSERT');
+      if (p.eventType === 'DELETE') fjernUttak(p.old.id); else visUttak(p.new);
     })
     .subscribe(s => { if (s === 'SUBSCRIBED') { hentAlle(); hentMeldinger(); hentHunder(); hentUttak(); } });
 }
