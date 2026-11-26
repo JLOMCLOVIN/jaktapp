@@ -54,6 +54,13 @@
   }
   .knapp-ring a { font-size: 12px !important; font-weight: 700; width: auto !important; padding: 0 8px; }
   .knapp-ring a.på { background: #e07a1f; color: #fff; }
+  #vind {
+    position: absolute; top: 46px; left: 50%; transform: translateX(-50%); z-index: 1000;
+    background: rgba(255,255,255,.92); color: #222; padding: 4px 10px; border-radius: 12px;
+    font-size: 12px; font-weight: 600; white-space: nowrap; display: none; align-items: center; gap: 6px;
+    box-shadow: 0 1px 4px rgba(0,0,0,.3);
+  }
+  #vind .pil { display: inline-block; font-size: 15px; line-height: 1; }
 
   /* Chat */
   #chat {
@@ -98,7 +105,8 @@
 <div id="app" style="display:none">
   <div id="kartomr">
   <div id="kart"></div>
-  <div id="status" title="Trykk for å kopiere lenken til laget">Starter …</div>
+  <div id="status" title="Trykk for å dele lenken til laget">Starter …</div>
+  <div id="vind"></div>
   <div id="chat">
     <div id="chatTopp">Meldinger til laget <button id="btnLukkChat" aria-label="Lukk">×</button></div>
     <div id="meldinger"></div>
@@ -132,7 +140,7 @@ const SEND_MINST_HVER_MS = 15000;   // send ikke oftere enn hvert 15. sekund ...
 const SEND_VED_FLYTT_M = 15;        // ... med mindre man har flyttet seg mer enn 15 m
 const GAMMEL_ETTER_MIN = 10;        // grå prikk etter 10 min uten oppdatering
 const VIS_SISTE_TIMER = 12;         // eldre posisjoner vises ikke
-const RINGER_M = [25, 50, 100];     // avstandsringer rundt egen posisjon
+const RINGER_M = [25, 50, 100, 150];     // avstandsringer rundt egen posisjon
 
 // Vis feil på skjermen, så de kan ses på telefonen
 function visFeil(t) {
@@ -271,7 +279,7 @@ const RingKnapp = L.Control.extend({
   onAdd() {
     const div = L.DomUtil.create('div', 'leaflet-bar knapp-ring');
     const a = L.DomUtil.create('a', ringerPå ? 'på' : '', div);
-    a.href = '#'; a.textContent = 'Ringer'; a.title = 'Vis avstandsringer 25, 50 og 100 m';
+    a.href = '#'; a.textContent = 'Ringer'; a.title = 'Vis avstandsringer 25, 50, 100 og 150 m';
     L.DomEvent.on(a, 'click', e => {
       L.DomEvent.stop(e);
       ringerPå = !ringerPå;
@@ -285,6 +293,93 @@ const RingKnapp = L.Control.extend({
 kart.addControl(new RingKnapp());
 
 // ----- Jaktlag og grense -----
+
+// ----- Vind og luktkjegle (MET Norway Locationforecast) -----
+const KJEGLE_VINKEL = 18;            // halv åpningsvinkel i grader
+const vindEl = document.getElementById('vind');
+let vind = null, vindHentetFor = null, vindHentetTid = 0;
+let vindHenter = false;
+const kjegleGruppe = L.layerGroup();
+let vindPå = localStorage.getItem('jakt_vind') !== 'av';
+const RETNINGER = ['N','NØ','Ø','SØ','S','SV','V','NV'];
+const retningTekst = g => RETNINGER[Math.round(((g % 360) + 360) % 360 / 45) % 8];
+
+function punktFra(lat, lng, avstandM, peilingGrader) {
+  const b = peilingGrader * Math.PI / 180;
+  return [lat + avstandM * Math.cos(b) / 111320,
+          lng + avstandM * Math.sin(b) / (111320 * Math.cos(lat * Math.PI / 180))];
+}
+function kjegleLengde() {
+  // Lengre kjegle når det blåser mer: 150 m i stille vær, opptil 600 m
+  return Math.min(600, 150 + (vind ? vind.fart : 0) * 60);
+}
+function tegnKjegle() {
+  kjegleGruppe.clearLayers();
+  if (!vindPå || !vind || !minPos) { if (kart.hasLayer(kjegleGruppe)) kart.removeLayer(kjegleGruppe); return; }
+  const medvind = (vind.fra + 180) % 360;             // lukta driver dit vinden blåser
+  const L0 = kjegleLengde();
+  // Tre lag: sterkest nærmest jegeren
+  [[1, 0.18], [0.66, 0.18], [0.33, 0.2]].forEach(([andel, opasitet]) => {
+    const lengde = L0 * andel, pkt = [[minPos.lat, minPos.lng]];
+    for (let v = -KJEGLE_VINKEL; v <= KJEGLE_VINKEL; v += 3) pkt.push(punktFra(minPos.lat, minPos.lng, lengde, medvind + v));
+    kjegleGruppe.addLayer(L.polygon(pkt, { interactive: false, stroke: false, fillColor: '#d7e600', fillOpacity: opasitet }));
+  });
+  if (!kart.hasLayer(kjegleGruppe)) kjegleGruppe.addTo(kart);
+}
+function visVind() {
+  if (!vind) { vindEl.style.display = 'none'; return; }
+  const medvind = (vind.fra + 180) % 360;
+  const kl = new Date(vind.tid).toLocaleTimeString('no', { hour: '2-digit', minute: '2-digit' });
+  vindEl.innerHTML = `<span class="pil" style="transform: rotate(${medvind}deg)">↑</span>` +
+    `Vind ${vind.fart.toFixed(1).replace('.', ',')} m/s fra ${retningTekst(vind.fra)}` +
+    (vind.kast ? ` (kast ${vind.kast.toFixed(0)})` : '') + ` · ${kl}`;
+  vindEl.style.display = vindPå ? 'flex' : 'none';
+}
+async function hentVind(tving) {
+  const sted = minPos || (grenseLag && (() => { const c = grenseLag.getBounds().getCenter(); return { lat: c.lat, lng: c.lng }; })()) || null;
+  if (!sted) return;
+  const flyttet = vindHentetFor ? kart.distance([sted.lat, sted.lng], [vindHentetFor.lat, vindHentetFor.lng]) : Infinity;
+  if (!tving && flyttet < 2000 && Date.now() - vindHentetTid < 15 * 60000) { tegnKjegle(); return; }
+  if (vindHenter) { tegnKjegle(); return; }
+  vindHenter = true;
+  try {
+    const url = `https://api.met.no/weatherapi/locationforecast/2.0/compact?lat=${sted.lat.toFixed(4)}&lon=${sted.lng.toFixed(4)}`;
+    const r = await fetch(url);
+    if (!r.ok) throw new Error('HTTP ' + r.status);
+    const j = await r.json();
+    // Velg tidssteget nærmest nå
+    const nå = Date.now();
+    const ts = j.properties.timeseries.reduce((a, b) =>
+      Math.abs(new Date(b.time) - nå) < Math.abs(new Date(a.time) - nå) ? b : a);
+    const d = ts.data.instant.details;
+    vind = { fra: d.wind_from_direction, fart: d.wind_speed, kast: d.wind_speed_of_gust, tid: ts.time };
+    vindHentetFor = sted; vindHentetTid = Date.now();
+  } catch (e) {
+    vindEl.textContent = 'Fikk ikke hentet vind'; vindEl.style.display = vindPå ? 'flex' : 'none';
+    return;
+  } finally { vindHenter = false; }
+  visVind(); tegnKjegle();
+}
+const VindKnapp = L.Control.extend({
+  options: { position: 'topleft' },
+  onAdd() {
+    const div = L.DomUtil.create('div', 'leaflet-bar knapp-ring');
+    const a = L.DomUtil.create('a', vindPå ? 'på' : '', div);
+    a.href = '#'; a.textContent = 'Vind'; a.title = 'Vis vindretning og luktkjegle';
+    L.DomEvent.on(a, 'click', e => {
+      L.DomEvent.stop(e);
+      vindPå = !vindPå;
+      localStorage.setItem('jakt_vind', vindPå ? 'på' : 'av');
+      a.className = vindPå ? 'på' : '';
+      visVind(); tegnKjegle();
+      if (vindPå && !vind) hentVind(true);
+    });
+    return div;
+  }
+});
+kart.addControl(new VindKnapp());
+setInterval(() => hentVind(true), 20 * 60000);
+
 async function hentLag() {
   const { data } = await db.from(LAGTABELL).select('navn, grense').eq('slug', lag).maybeSingle();
   if (!data) return;
@@ -294,6 +389,7 @@ async function hentLag() {
     grenseLag = L.geoJSON(data.grense, { interactive: false,
       style: { color: '#ff6a00', weight: 3, fill: true, fillOpacity: 0.04, dashArray: '8 6' } }).addTo(kart);
     if (førsteVisning && !minPos) kart.fitBounds(grenseLag.getBounds(), { padding: [20, 20] });
+    if (!minPos) hentVind(false);
   }
   oppdaterTider();
 }
@@ -385,7 +481,7 @@ function startPosisjon() {
   if (testpos) {
     const [lat, lng] = testpos.split(',').map(Number);
     minPos = { lat, lng, acc: 10 };
-    oppdaterRinger(); kart.setView([lat, lng], 17); førsteVisning = false;
+    oppdaterRinger(); kart.setView([lat, lng], 17); førsteVisning = false; hentVind(false);
     sendPosisjon(minPos, true);
     return;
   }
@@ -394,7 +490,7 @@ function startPosisjon() {
     minPos = { lat: p.coords.latitude, lng: p.coords.longitude, acc: Math.round(p.coords.accuracy) };
     if (nøyaktighetSirkel) nøyaktighetSirkel.setLatLng([minPos.lat, minPos.lng]).setRadius(minPos.acc);
     else nøyaktighetSirkel = L.circle([minPos.lat, minPos.lng], { radius: minPos.acc, weight: 1, color: '#1f6fe0', fillOpacity: .1, interactive: false }).addTo(kart);
-    oppdaterRinger();
+    oppdaterRinger(); hentVind(false);
     if (førsteVisning) { kart.setView([minPos.lat, minPos.lng], 16); førsteVisning = false; }
     sendPosisjon(minPos, false);
   }, e => settStatus('Posisjon: ' + e.message), { enableHighAccuracy: true, maximumAge: 5000, timeout: 30000 });
