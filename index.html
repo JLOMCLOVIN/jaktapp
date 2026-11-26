@@ -217,6 +217,7 @@
     </div>
     <div id="installer"></div>
     <div class="lagknapper" style="grid-template-columns:1fr">
+      <button id="btnNyJakt">Ny jakt: tøm chat, uttak og hund</button>
       <button id="btnForlat" style="background:none;color:#b00">Forlat jaktlaget</button>
     </div>
   </div>
@@ -630,8 +631,20 @@ function visMelding(m, ny) {
     if (navigator.vibrate && !m.tekst.startsWith('Uttak!')) navigator.vibrate(200);
   }
 }
+// Ny jakt: meldinger og uttak fra før siste nullstilling vises ikke
+let nullstiltTid = null;
+async function hentNullstilt() {
+  try {
+    const { data } = await db.from('jakt_hendelser').select('tid').eq('lag', lag).eq('type', 'nullstilt')
+      .order('tid', { ascending: false }).limit(1);
+    if (data && data.length) nullstiltTid = data[0].tid;
+  } catch (e) {}
+}
 async function hentMeldinger() {
-  const { data } = await db.from(MELDINGER).select('*').eq('lag', lag).order('sendt', { ascending: false }).limit(100);
+  await hentNullstilt();
+  let q = db.from(MELDINGER).select('*').eq('lag', lag);
+  if (nullstiltTid) q = q.gt('sendt', nullstiltTid);
+  const { data } = await q.order('sendt', { ascending: false }).limit(100);
   (data || []).reverse().forEach(m => visMelding(m, false));
 }
 document.getElementById('btnChat').onclick = () => {
@@ -758,7 +771,9 @@ function uttakIkon(h) {
     html: `<div class="merke2">✕</div><div class="navn">Uttak ${t}</div>` });
 }
 function visUttak(h) {
-  if (!h || h.lag !== lag || uttak[h.id]) return;
+  if (h && h.lag === lag && h.type === 'nullstilt') { tømJakta(h.tid); return; }
+  if (!h || h.lag !== lag || h.type !== 'uttak' || uttak[h.id]) return;
+  if (nullstiltTid && new Date(h.tid) <= new Date(nullstiltTid)) return;
   const m = L.marker([h.lat, h.lng], { icon: uttakIkon(h), zIndexOffset: 400 }).addTo(kart);
   const dato = new Date(h.tid).toLocaleString('no', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
   m.bindPopup(`<b>Uttak, los i gang</b><br>Registrert av ${escape(h.navn)}, ${dato}<br><a href="#" data-slett="${h.id}">Slett markøren</a>`);
@@ -776,9 +791,28 @@ function visUttak(h) {
 function fjernUttak(id) { if (uttak[id]) { kart.removeLayer(uttak[id]); delete uttak[id]; } }
 async function hentUttak() {
   const fra = new Date(Date.now() - VIS_UTTAK_TIMER * 3600000).toISOString();
-  const { data } = await db.from('jakt_hendelser').select('*').eq('lag', lag).gte('tid', fra);
+  await hentNullstilt();
+  const { data } = await db.from('jakt_hendelser').select('*').eq('lag', lag).eq('type', 'uttak').gte('tid', fra);
   (data || []).forEach(h => visUttak(h));
 }
+// Tøm chat, uttak og hund på kartet (lokalt, når noen har startet ny jakt)
+function tømJakta(tid) {
+  nullstiltTid = tid;
+  meldingerEl.innerHTML = ''; vistMelding.clear(); ulest = 0; ulestEl.textContent = '';
+  Object.keys(uttak).forEach(fjernUttak);
+  Object.keys(hundData).forEach(fjernHund);
+}
+document.getElementById('btnNyJakt').onclick = async () => {
+  if (!confirm('Starte ny jakt? Chat, uttak og hundeposisjon fra denne jakta fjernes for alle i laget.')) return;
+  await db.from('jakt_hendelser').delete().eq('lag', lag).eq('type', 'uttak');
+  await db.from('jakt_hunder').delete().eq('lag', lag);
+  const { data, error } = await db.from('jakt_hendelser')
+    .insert({ lag, type: 'nullstilt', lat: 0, lng: 0, navn: mittNavn }).select().single();
+  if (error) { alert('Fikk ikke nullstilt: ' + error.message); return; }
+  tømJakta(data.tid);
+  lagetEl.classList.remove('åpen');
+  settStatus('Ny jakt startet'); setTimeout(oppdaterTider, 2500);
+};
 function varsleUttak(tekst) {
   if (navigator.vibrate) navigator.vibrate([300, 150, 300]);
   statusEl.style.background = '#b3261e';
