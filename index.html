@@ -16,13 +16,18 @@
   }
   #meny button {
     flex: 1; border: 0; border-radius: 8px; font-size: 13px; font-weight: 600;
-    background: #4a5a40; color: #fff;
+    background: #4a5a40; color: #fff; position: relative;
   }
   #meny button.på { background: #e07a1f; }
+  .merke {
+    position: absolute; top: -6px; right: -4px; min-width: 18px; height: 18px; border-radius: 9px;
+    background: #d0312d; color: #fff; font-size: 11px; line-height: 18px; padding: 0 4px; box-sizing: border-box;
+  }
+  .merke:empty { display: none; }
   #status {
     position: absolute; top: 10px; left: 50%; transform: translateX(-50%); z-index: 1000;
     background: rgba(0,0,0,.7); color: #fff; padding: 6px 12px; border-radius: 16px;
-    font-size: 13px; white-space: nowrap;
+    font-size: 13px; white-space: nowrap; cursor: pointer;
   }
   .jeger { background: none; border: 0; }
   .jeger .prikk {
@@ -36,16 +41,72 @@
     text-shadow: 0 0 3px #fff, 0 0 3px #fff, 0 0 3px #fff; white-space: nowrap;
   }
   .jeger .tid { font-weight: 400; }
+  .ringtekst { background: none; border: 0; }
+  .ringtekst div {
+    font-size: 13px; font-weight: 800; color: #fff; text-align: center;
+    text-shadow: 0 0 3px #000, 0 0 3px #000, 0 0 2px #000;
+  }
+  .knapp-ring a { font-size: 12px !important; font-weight: 700; width: auto !important; padding: 0 8px; }
+  .knapp-ring a.på { background: #e07a1f; color: #fff; }
+
+  /* Chat */
+  #chat {
+    position: absolute; left: 0; right: 0; bottom: 64px; height: 55%; z-index: 1100;
+    background: #fff; border-radius: 14px 14px 0 0; box-shadow: 0 -4px 16px rgba(0,0,0,.3);
+    display: none; flex-direction: column;
+  }
+  #chat.åpen { display: flex; }
+  #chatTopp { display: flex; align-items: center; padding: 10px 14px; border-bottom: 1px solid #ddd; font-weight: 700; }
+  #chatTopp button { margin-left: auto; border: 0; background: none; font-size: 22px; line-height: 1; }
+  #meldinger { flex: 1; overflow-y: auto; padding: 10px 12px; }
+  .mld { margin: 0 0 8px; max-width: 85%; }
+  .mld .hvem { font-size: 11px; color: #666; margin-bottom: 2px; }
+  .mld .tekst { background: #eef0ea; padding: 7px 10px; border-radius: 10px; font-size: 15px; white-space: pre-wrap; word-wrap: break-word; }
+  .mld.min { margin-left: auto; text-align: right; }
+  .mld.min .tekst { background: #2f3b2a; color: #fff; text-align: left; display: inline-block; }
+  #chatSkjema { display: flex; gap: 6px; padding: 8px; border-top: 1px solid #ddd; }
+  #chatTekst { flex: 1; font-size: 16px; padding: 8px 10px; border: 1px solid #bbb; border-radius: 8px; }
+  #chatSkjema button { border: 0; border-radius: 8px; background: #2f3b2a; color: #fff; font-weight: 700; padding: 0 14px; }
+
+  /* Startside */
+  #start { display: none; max-width: 420px; margin: 0 auto; padding: 32px 20px; }
+  #start h1 { font-size: 24px; margin: 0 0 6px; }
+  #start p { color: #444; line-height: 1.45; }
+  #start label { display: block; font-weight: 700; margin: 18px 0 6px; }
+  #start input { width: 100%; box-sizing: border-box; font-size: 17px; padding: 10px; border: 1px solid #aaa; border-radius: 8px; }
+  #start button { margin-top: 12px; width: 100%; font-size: 17px; font-weight: 700; padding: 12px; border: 0; border-radius: 8px; background: #2f3b2a; color: #fff; }
+  #startFeil { color: #b00; }
 </style>
 </head>
 <body>
-<div id="kart"></div>
-<div id="status">Starter …</div>
-<div id="meny">
-  <button id="btnMeg">Meg</button>
-  <button id="btnAlle">Alle</button>
-  <button id="btnSkjerm">Skjerm på</button>
-  <button id="btnStopp">Stopp deling</button>
+
+<div id="start">
+  <h1>Jaktlaget</h1>
+  <p>Se hvor de andre i jaktlaget er. Opprett et jaktlag og del lenken med laget.</p>
+  <label for="nyttLag">Navn på jaktlaget</label>
+  <input id="nyttLag" placeholder="For eksempel Lordalen elgjakt" maxlength="60">
+  <button id="btnOpprett">Opprett jaktlag</button>
+  <p id="startFeil"></p>
+</div>
+
+<div id="app" style="display:none">
+  <div id="kart"></div>
+  <div id="status" title="Trykk for å kopiere lenken til laget">Starter …</div>
+  <div id="chat">
+    <div id="chatTopp">Meldinger til laget <button id="btnLukkChat" aria-label="Lukk">×</button></div>
+    <div id="meldinger"></div>
+    <form id="chatSkjema" autocomplete="off">
+      <input id="chatTekst" placeholder="Skriv en melding" maxlength="1000">
+      <button type="submit">Send</button>
+    </form>
+  </div>
+  <div id="meny">
+    <button id="btnMeg">Meg</button>
+    <button id="btnAlle">Alle</button>
+    <button id="btnChat">Chat<span class="merke" id="ulest"></span></button>
+    <button id="btnSkjerm">Skjerm på</button>
+    <button id="btnStopp">Stopp deling</button>
+  </div>
 </div>
 
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
@@ -55,17 +116,44 @@
 const SUPABASE_URL = 'https://hmutcnvixydixymfldut.supabase.co';
 const SUPABASE_ANON_KEY = 'sb_publishable_kMmJIYAILLcjAzP2NtYZ9w_vEPYuAor';
 const TABELL = 'jakt_posisjoner';
+const LAGTABELL = 'jakt_lag';
+const MELDINGER = 'jakt_meldinger';
 // ===================================================
 
 const SEND_MINST_HVER_MS = 15000;   // send ikke oftere enn hvert 15. sekund ...
 const SEND_VED_FLYTT_M = 15;        // ... med mindre man har flyttet seg mer enn 15 m
 const GAMMEL_ETTER_MIN = 10;        // grå prikk etter 10 min uten oppdatering
 const VIS_SISTE_TIMER = 12;         // eldre posisjoner vises ikke
+const RINGER_M = [25, 50, 100];     // avstandsringer rundt egen posisjon
 
 const db = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
-const lag = new URLSearchParams(location.search).get('lag') || 'jaktlaget';
+const lag = new URLSearchParams(location.search).get('lag');
 
-// Egen id og navn lagres på telefonen
+function escape(s) { return String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+
+// ---------- Startside: opprett jaktlag ----------
+if (!lag) {
+  document.getElementById('start').style.display = 'block';
+  document.getElementById('btnOpprett').onclick = async () => {
+    const navn = document.getElementById('nyttLag').value.trim();
+    const feil = document.getElementById('startFeil');
+    if (!navn) { feil.textContent = 'Skriv inn et navn.'; return; }
+    const base = navn.toLowerCase().replace(/æ/g, 'ae').replace(/ø/g, 'o').replace(/å/g, 'a')
+      .replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 30) || 'lag';
+    const tegn = 'abcdefghijkmnpqrstuvwxyz23456789';
+    const slug = base + '-' + Array.from(crypto.getRandomValues(new Uint8Array(4)), b => tegn[b % tegn.length]).join('');
+    const { error } = await db.from(LAGTABELL).insert({ slug, navn });
+    if (error) { feil.textContent = 'Klarte ikke å opprette laget: ' + error.message; return; }
+    location.search = '?lag=' + encodeURIComponent(slug);
+  };
+} else {
+  startKart();
+}
+
+// ---------- Kartvisning ----------
+function startKart() {
+document.getElementById('app').style.display = 'block';
+
 let minId = localStorage.getItem('jakt_id');
 if (!minId) { minId = crypto.randomUUID(); localStorage.setItem('jakt_id', minId); }
 let mittNavn = localStorage.getItem('jakt_navn');
@@ -74,18 +162,32 @@ while (!mittNavn) {
   if (mittNavn) localStorage.setItem('jakt_navn', mittNavn);
 }
 
-// Kart: Kartverket topo
 const kart = L.map('kart', { zoomControl: false }).setView([60.0, 11.0], 13);
-L.tileLayer('https://cache.kartverket.no/v1/wmts/1.0.0/topo/default/webmercator/{z}/{y}/{x}.png', {
+const topo = L.tileLayer('https://cache.kartverket.no/v1/wmts/1.0.0/topo/default/webmercator/{z}/{y}/{x}.png', {
   maxZoom: 18, attribution: '&copy; Kartverket'
-}).addTo(kart);
+});
+const flyfoto = L.tileLayer('https://opencache.statkart.no/gatekeeper/gk/gk.open_nib_web_mercator_wmts_v2?SERVICE=WMTS&REQUEST=GetTile&VERSION=1.0.0&LAYER=Nibcache_web_mercator_v2&STYLE=default&FORMAT=image/jpgpng&TILEMATRIXSET=default028mm&TILEMATRIX={z}&TILEROW={y}&TILECOL={x}', {
+  maxZoom: 19, attribution: '&copy; Norge i bilder'
+});
+const valgtLag = localStorage.getItem('jakt_kartlag') === 'flyfoto' ? flyfoto : topo;
+valgtLag.addTo(kart);
+L.control.layers({ 'Topografisk': topo, 'Flyfoto': flyfoto }, null, { position: 'topright' }).addTo(kart);
+kart.on('baselayerchange', e => localStorage.setItem('jakt_kartlag', e.layer === flyfoto ? 'flyfoto' : 'topo'));
 
 const statusEl = document.getElementById('status');
 const settStatus = t => statusEl.textContent = t;
+let lagNavn = lag;
+statusEl.onclick = async () => {
+  const lenke = location.origin + location.pathname + '?lag=' + encodeURIComponent(lag);
+  try {
+    if (navigator.share) await navigator.share({ title: 'Jaktlaget ' + lagNavn, url: lenke });
+    else { await navigator.clipboard.writeText(lenke); settStatus('Lenken er kopiert'); setTimeout(oppdaterTider, 2000); }
+  } catch (e) { /* avbrutt */ }
+};
 
 const jegere = {};   // id -> { data, markør }
 let minPos = null, sistSendt = null, sistSendtTid = 0, deler = true, førsteVisning = true;
-let nøyaktighetSirkel = null;
+let nøyaktighetSirkel = null, grenseLag = null;
 
 function minutterSiden(ts) { return Math.floor((Date.now() - new Date(ts).getTime()) / 60000); }
 function tidTekst(ts) {
@@ -94,7 +196,6 @@ function tidTekst(ts) {
   if (m < 60) return m + ' min';
   return Math.floor(m / 60) + ' t ' + (m % 60) + ' min';
 }
-function escape(s) { return String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
 
 function ikon(d) {
   const klasser = ['jeger'];
@@ -113,7 +214,7 @@ function visJeger(d) {
     finnes.data = d;
     finnes.markør.setLatLng([d.lat, d.lng]).setIcon(ikon(d));
   } else {
-    const m = L.marker([d.lat, d.lng], { icon: ikon(d) }).addTo(kart);
+    const m = L.marker([d.lat, d.lng], { icon: ikon(d), zIndexOffset: d.id === minId ? 1000 : 0 }).addTo(kart);
     jegere[d.id] = { data: d, markør: m };
   }
 }
@@ -123,11 +224,60 @@ function fjernJeger(id) {
 function oppdaterTider() {
   Object.values(jegere).forEach(j => j.markør.setIcon(ikon(j.data)));
   const andre = Object.keys(jegere).filter(id => id !== minId).length;
-  settStatus(`${lag} · ${andre} andre${deler ? '' : ' · deler ikke'}`);
+  settStatus(`${lagNavn} · ${andre} andre${deler ? '' : ' · deler ikke'}`);
 }
 function visAlle() {
   const pkt = Object.values(jegere).map(j => [j.data.lat, j.data.lng]);
   if (pkt.length) kart.fitBounds(pkt, { padding: [50, 50], maxZoom: 16 });
+  else if (grenseLag) kart.fitBounds(grenseLag.getBounds(), { padding: [20, 20] });
+}
+
+// ----- Avstandsringer rundt egen posisjon -----
+const ringGruppe = L.layerGroup();
+const ringSirkler = RINGER_M.map(r => L.circle([0, 0], { radius: r, color: '#fff', weight: 2, fill: false, interactive: false }));
+const ringTekster = RINGER_M.map(r => L.marker([0, 0], { interactive: false, keyboard: false,
+  icon: L.divIcon({ className: 'ringtekst', iconSize: [60, 16], iconAnchor: [30, 0], html: `<div>${r} m</div>` }) }));
+ringSirkler.forEach(c => ringGruppe.addLayer(c));
+ringTekster.forEach(t => ringGruppe.addLayer(t));
+let ringerPå = localStorage.getItem('jakt_ringer') !== 'av';
+function oppdaterRinger() {
+  if (!minPos) return;
+  RINGER_M.forEach((r, i) => {
+    ringSirkler[i].setLatLng([minPos.lat, minPos.lng]);
+    ringTekster[i].setLatLng([minPos.lat - r / 111320, minPos.lng]);   // tekst på sørsiden av ringen
+  });
+  if (ringerPå && !kart.hasLayer(ringGruppe)) ringGruppe.addTo(kart);
+}
+const RingKnapp = L.Control.extend({
+  options: { position: 'topleft' },
+  onAdd() {
+    const div = L.DomUtil.create('div', 'leaflet-bar knapp-ring');
+    const a = L.DomUtil.create('a', ringerPå ? 'på' : '', div);
+    a.href = '#'; a.textContent = 'Ringer'; a.title = 'Vis avstandsringer 25, 50 og 100 m';
+    L.DomEvent.on(a, 'click', e => {
+      L.DomEvent.stop(e);
+      ringerPå = !ringerPå;
+      localStorage.setItem('jakt_ringer', ringerPå ? 'på' : 'av');
+      a.className = ringerPå ? 'på' : '';
+      if (ringerPå) oppdaterRinger(); else kart.removeLayer(ringGruppe);
+    });
+    return div;
+  }
+});
+kart.addControl(new RingKnapp());
+
+// ----- Jaktlag og grense -----
+async function hentLag() {
+  const { data } = await db.from(LAGTABELL).select('navn, grense').eq('slug', lag).maybeSingle();
+  if (!data) return;
+  lagNavn = data.navn || lag;
+  document.title = 'Jaktlaget ' + lagNavn;
+  if (data.grense) {
+    grenseLag = L.geoJSON(data.grense, { interactive: false,
+      style: { color: '#ff6a00', weight: 3, fill: true, fillOpacity: 0.04, dashArray: '8 6' } }).addTo(kart);
+    if (førsteVisning && !minPos) kart.fitBounds(grenseLag.getBounds(), { padding: [20, 20] });
+  }
+  oppdaterTider();
 }
 
 async function hentAlle() {
@@ -139,6 +289,52 @@ async function hentAlle() {
   if (førsteVisning && data.length) { visAlle(); førsteVisning = false; }
 }
 
+// ----- Meldinger -----
+const chatEl = document.getElementById('chat');
+const meldingerEl = document.getElementById('meldinger');
+const ulestEl = document.getElementById('ulest');
+const vistMelding = new Set();
+let ulest = 0;
+function klokke(ts) {
+  const d = new Date(ts), idag = new Date().toDateString() === d.toDateString();
+  const t = d.toLocaleTimeString('no', { hour: '2-digit', minute: '2-digit' });
+  return idag ? t : d.toLocaleDateString('no', { day: 'numeric', month: 'short' }) + ' ' + t;
+}
+function visMelding(m, ny) {
+  if (!m || m.lag !== lag || vistMelding.has(m.id)) return;
+  vistMelding.add(m.id);
+  const min = m.avsender_id === minId;
+  const div = document.createElement('div');
+  div.className = 'mld' + (min ? ' min' : '');
+  div.innerHTML = `<div class="hvem">${min ? '' : escape(m.navn) + ' · '}${klokke(m.sendt)}</div><div class="tekst">${escape(m.tekst)}</div>`;
+  meldingerEl.appendChild(div);
+  meldingerEl.scrollTop = meldingerEl.scrollHeight;
+  if (ny && !min && !chatEl.classList.contains('åpen')) {
+    ulest++; ulestEl.textContent = ulest;
+    if (navigator.vibrate) navigator.vibrate(200);
+  }
+}
+async function hentMeldinger() {
+  const { data } = await db.from(MELDINGER).select('*').eq('lag', lag).order('sendt', { ascending: false }).limit(100);
+  (data || []).reverse().forEach(m => visMelding(m, false));
+}
+document.getElementById('btnChat').onclick = () => {
+  const åpen = chatEl.classList.toggle('åpen');
+  if (åpen) { ulest = 0; ulestEl.textContent = ''; meldingerEl.scrollTop = meldingerEl.scrollHeight; }
+};
+document.getElementById('btnLukkChat').onclick = () => chatEl.classList.remove('åpen');
+document.getElementById('chatSkjema').onsubmit = async e => {
+  e.preventDefault();
+  const felt = document.getElementById('chatTekst');
+  const tekst = felt.value.trim();
+  if (!tekst) return;
+  felt.value = '';
+  const { data, error } = await db.from(MELDINGER).insert({ lag, avsender_id: minId, navn: mittNavn, tekst }).select().single();
+  if (error) { felt.value = tekst; settStatus('Fikk ikke sendt meldingen'); return; }
+  visMelding(data, false);
+};
+
+// ----- Sanntid -----
 function lyttPåEndringer() {
   db.channel('jakt-' + lag)
     .on('postgres_changes', { event: '*', schema: 'public', table: TABELL, filter: `lag=eq.${lag}` }, p => {
@@ -146,7 +342,8 @@ function lyttPåEndringer() {
       else visJeger(p.new);
       oppdaterTider();
     })
-    .subscribe(s => { if (s === 'SUBSCRIBED') hentAlle(); });
+    .on('postgres_changes', { event: 'INSERT', schema: 'public', table: MELDINGER, filter: `lag=eq.${lag}` }, p => visMelding(p.new, true))
+    .subscribe(s => { if (s === 'SUBSCRIBED') { hentAlle(); hentMeldinger(); } });
 }
 
 function avstand(a, b) { return kart.distance([a.lat, a.lng], [b.lat, b.lng]); }
@@ -169,8 +366,9 @@ function startPosisjon() {
   navigator.geolocation.watchPosition(p => {
     minPos = { lat: p.coords.latitude, lng: p.coords.longitude, acc: Math.round(p.coords.accuracy) };
     if (nøyaktighetSirkel) nøyaktighetSirkel.setLatLng([minPos.lat, minPos.lng]).setRadius(minPos.acc);
-    else nøyaktighetSirkel = L.circle([minPos.lat, minPos.lng], { radius: minPos.acc, weight: 1, color: '#1f6fe0', fillOpacity: .1 }).addTo(kart);
-    if (førsteVisning) { kart.setView([minPos.lat, minPos.lng], 15); førsteVisning = false; }
+    else nøyaktighetSirkel = L.circle([minPos.lat, minPos.lng], { radius: minPos.acc, weight: 1, color: '#1f6fe0', fillOpacity: .1, interactive: false }).addTo(kart);
+    oppdaterRinger();
+    if (førsteVisning) { kart.setView([minPos.lat, minPos.lng], 16); førsteVisning = false; }
     sendPosisjon(minPos, false);
   }, e => settStatus('Posisjon: ' + e.message), { enableHighAccuracy: true, maximumAge: 5000, timeout: 30000 });
 }
@@ -178,14 +376,14 @@ function startPosisjon() {
 // Send med en gang når telefonen tas opp igjen
 document.addEventListener('visibilitychange', () => {
   if (document.visibilityState === 'visible') {
-    hentAlle();
+    hentAlle(); hentMeldinger();
     if (minPos) sendPosisjon(minPos, true);
     if (wakeLock === 'ønsket') slåPåSkjerm();
   }
 });
 
 // Knapper
-document.getElementById('btnMeg').onclick = () => { if (minPos) kart.setView([minPos.lat, minPos.lng], 16); };
+document.getElementById('btnMeg').onclick = () => { if (minPos) kart.setView([minPos.lat, minPos.lng], 17); };
 document.getElementById('btnAlle').onclick = visAlle;
 
 let wakeLock = null;
@@ -221,8 +419,10 @@ btnStopp.onclick = async () => {
 };
 
 setInterval(oppdaterTider, 30000);
+hentLag();
 lyttPåEndringer();
 startPosisjon();
+}
 </script>
 </body>
 </html>
