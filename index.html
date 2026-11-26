@@ -2,22 +2,28 @@
 <html lang="no">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
 <meta name="theme-color" content="#2f3b2a">
 <title>Jaktlaget</title>
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
 <style>
   html, body { margin: 0; height: 100%; font-family: -apple-system, system-ui, sans-serif; }
-  #kart { position: absolute; inset: 0 0 64px 0; }
+  /* Fast oppsett som følger den synlige skjermen, også på iPhone med verktøylinje nederst */
+  #app { position: fixed; inset: 0; flex-direction: column; }
+  #kartomr { position: relative; flex: 1 1 auto; min-height: 0; }
+  #kart { position: absolute; inset: 0; }
   #meny {
-    position: absolute; left: 0; right: 0; bottom: 0; height: 64px;
-    display: flex; gap: 6px; padding: 8px; box-sizing: border-box;
-    background: #2f3b2a; padding-bottom: max(8px, env(safe-area-inset-bottom));
+    position: relative; flex: 0 0 auto; z-index: 1200;
+    display: flex; gap: 6px; box-sizing: border-box;
+    background: #2f3b2a; padding: 8px 8px max(8px, env(safe-area-inset-bottom));
   }
   #meny button {
-    flex: 1; border: 0; border-radius: 8px; font-size: 13px; font-weight: 600;
-    background: #4a5a40; color: #fff; position: relative;
+    flex: 1; min-height: 48px; border: 0; border-radius: 8px; font-size: 13px; font-weight: 600;
+    background: #4a5a40; color: #fff; position: relative; cursor: pointer;
+    -webkit-appearance: none; appearance: none; touch-action: manipulation;
+    -webkit-tap-highlight-color: rgba(255,255,255,.2); font-family: inherit; padding: 0 2px;
   }
+  #meny button:active { background: #5d7050; }
   #meny button.på { background: #e07a1f; }
   .merke {
     position: absolute; top: -6px; right: -4px; min-width: 18px; height: 18px; border-radius: 9px;
@@ -51,7 +57,7 @@
 
   /* Chat */
   #chat {
-    position: absolute; left: 0; right: 0; bottom: 64px; height: 55%; z-index: 1100;
+    position: absolute; left: 0; right: 0; bottom: 0; height: 60%; z-index: 1100;
     background: #fff; border-radius: 14px 14px 0 0; box-shadow: 0 -4px 16px rgba(0,0,0,.3);
     display: none; flex-direction: column;
   }
@@ -90,6 +96,7 @@
 </div>
 
 <div id="app" style="display:none">
+  <div id="kartomr">
   <div id="kart"></div>
   <div id="status" title="Trykk for å kopiere lenken til laget">Starter …</div>
   <div id="chat">
@@ -99,6 +106,7 @@
       <input id="chatTekst" placeholder="Skriv en melding" maxlength="1000">
       <button type="submit">Send</button>
     </form>
+  </div>
   </div>
   <div id="meny">
     <button id="btnMeg">Meg</button>
@@ -126,6 +134,14 @@ const GAMMEL_ETTER_MIN = 10;        // grå prikk etter 10 min uten oppdatering
 const VIS_SISTE_TIMER = 12;         // eldre posisjoner vises ikke
 const RINGER_M = [25, 50, 100];     // avstandsringer rundt egen posisjon
 
+// Vis feil på skjermen, så de kan ses på telefonen
+function visFeil(t) {
+  const el = document.getElementById('status');
+  if (el) { el.textContent = 'Feil: ' + t; el.style.background = '#b00'; el.style.whiteSpace = 'normal'; }
+}
+window.addEventListener('error', e => visFeil(e.message));
+window.addEventListener('unhandledrejection', e => visFeil((e.reason && e.reason.message) || e.reason));
+
 const db = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 const lag = new URLSearchParams(location.search).get('lag');
 
@@ -152,10 +168,10 @@ if (!lag) {
 
 // ---------- Kartvisning ----------
 function startKart() {
-document.getElementById('app').style.display = 'block';
+document.getElementById('app').style.display = 'flex';
 
 let minId = localStorage.getItem('jakt_id');
-if (!minId) { minId = crypto.randomUUID(); localStorage.setItem('jakt_id', minId); }
+if (!minId) { minId = (crypto.randomUUID ? crypto.randomUUID() : 'xxxxxxxx-xxxx-4xxx-8xxx-xxxxxxxxxxxx'.replace(/x/g, () => (Math.random() * 16 | 0).toString(16))); localStorage.setItem('jakt_id', minId); }
 let mittNavn = localStorage.getItem('jakt_navn');
 while (!mittNavn) {
   mittNavn = (prompt('Hva heter du? (vises for resten av laget)') || '').trim();
@@ -163,6 +179,7 @@ while (!mittNavn) {
 }
 
 const kart = L.map('kart', { zoomControl: false }).setView([60.0, 11.0], 13);
+window.addEventListener('resize', () => kart.invalidateSize());
 const topo = L.tileLayer('https://cache.kartverket.no/v1/wmts/1.0.0/topo/default/webmercator/{z}/{y}/{x}.png', {
   maxZoom: 18, attribution: '&copy; Kartverket'
 });
@@ -393,7 +410,10 @@ document.addEventListener('visibilitychange', () => {
 });
 
 // Knapper
-document.getElementById('btnMeg').onclick = () => { if (minPos) kart.setView([minPos.lat, minPos.lng], 17); };
+document.getElementById('btnMeg').onclick = () => {
+  if (minPos) kart.setView([minPos.lat, minPos.lng], 17);
+  else { settStatus('Venter på posisjon …'); setTimeout(oppdaterTider, 2500); }
+};
 document.getElementById('btnAlle').onclick = visAlle;
 
 let wakeLock = null;
