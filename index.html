@@ -959,7 +959,15 @@ async function lagreAbonnement(sub) {
     p_abonnement: sub.toJSON(), p_meldinger: varselMeldingerEl.checked });
   if (error) throw error;
 }
+// Knappene viser om varsler er på eller av for dette laget
+function merkVarselKnapper(på) {
+  const p = document.getElementById('btnVarsler'), a = document.getElementById('btnVarslerAv');
+  p.className = på ? '' : 'hoved'; a.className = på ? 'hoved' : '';
+  p.textContent = på ? 'Varsler er på ✓' : 'Slå på varsler';
+  a.textContent = på ? 'Slå av varsler' : 'Varsler er av';
+}
 async function visVarselStatus() {
+  merkVarselKnapper(localStorage.getItem('jakt_varsel_' + lag) === 'på' && 'Notification' in window && Notification.permission === 'granted');
   const iOS = /iPhone|iPad|iPod/.test(navigator.userAgent);
   const installert = window.matchMedia('(display-mode: standalone)').matches || navigator.standalone;
   if (!støtterVarsler()) {
@@ -973,7 +981,9 @@ async function visVarselStatus() {
     return;
   }
   const sub = await aktivtAbonnement();
-  varselInfo.textContent = sub && Notification.permission === 'granted'
+  const påHer = localStorage.getItem('jakt_varsel_' + lag) !== 'av';
+  if (sub && påHer && Notification.permission === 'granted') { localStorage.setItem('jakt_varsel_' + lag, 'på'); merkVarselKnapper(true); }
+  varselInfo.textContent = sub && påHer && Notification.permission === 'granted'
     ? 'Varsler er på for dette laget. Uttak gir alltid varsel.'
     : 'Få varsel med vibrering når det kommer uttak eller meldinger, også når appen er lukket.';
 }
@@ -986,23 +996,25 @@ document.getElementById('btnVarsler').onclick = async () => {
     const sub = (await reg.pushManager.getSubscription()) ||
       await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: b64tilBytes(VAPID_PUBLIC) });
     await lagreAbonnement(sub);
+    localStorage.setItem('jakt_varsel_' + lag, 'på'); merkVarselKnapper(true);
     varselInfo.textContent = 'Varsler er på for dette laget. Uttak gir alltid varsel.';
   } catch (e) { varselInfo.textContent = 'Klarte ikke å slå på varsler: ' + (e.message || e); }
 };
 document.getElementById('btnVarslerAv').onclick = async () => {
   const sub = await aktivtAbonnement();
   if (sub) await db.rpc('jakt_slett_push', { p_endpoint: sub.endpoint, p_lag: lag });
+  localStorage.setItem('jakt_varsel_' + lag, 'av'); merkVarselKnapper(false);
   varselInfo.textContent = 'Varsler er slått av for dette laget.';
 };
 varselMeldingerEl.onchange = async () => {
   localStorage.setItem('jakt_varsel_meldinger_' + lag, varselMeldingerEl.checked ? 'på' : 'av');
   const sub = await aktivtAbonnement();
-  if (sub && Notification.permission === 'granted') { try { await lagreAbonnement(sub); } catch (e) {} }
+  if (sub && Notification.permission === 'granted' && localStorage.getItem('jakt_varsel_' + lag) !== 'av') { try { await lagreAbonnement(sub); } catch (e) {} }
 };
 // Hold abonnementet oppdatert når appen åpnes
 (async () => {
   try {
-    if (støtterVarsler() && Notification.permission === 'granted') {
+    if (støtterVarsler() && Notification.permission === 'granted' && localStorage.getItem('jakt_varsel_' + lag) !== 'av') {
       const sub = await aktivtAbonnement();
       if (sub) await lagreAbonnement(sub);
     }

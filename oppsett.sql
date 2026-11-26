@@ -155,6 +155,7 @@ create table if not exists public.jakt_push (
 );
 alter table public.jakt_push enable row level security;
 revoke all on public.jakt_push from anon, authenticated;
+grant select, delete on public.jakt_push to service_role;   -- Edge Function leser mottakere
 
 create or replace function public.jakt_lagre_push(p_endpoint text, p_lag text, p_medlem uuid, p_abonnement jsonb, p_meldinger boolean)
 returns void language sql security definer set search_path = public as $$

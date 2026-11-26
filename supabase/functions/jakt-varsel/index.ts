@@ -31,7 +31,7 @@ Deno.serve(async (req) => {
 
   let q = db.from("jakt_push").select("endpoint, abonnement").eq("lag", m.lag).neq("medlem_id", m.avsender_id);
   if (!uttak) q = q.eq("meldinger", true);
-  const { data: mottakere } = await q;
+  const { data: mottakere, error: lesefeil } = await q;
   const { data: lagRad } = await db.from("jakt_lag").select("navn").eq("slug", m.lag).maybeSingle();
   const lagNavn = lagRad?.navn ?? m.lag;
 
@@ -43,16 +43,19 @@ Deno.serve(async (req) => {
   });
 
   let sendt = 0;
+  const feil: string[] = [];
+  if (lesefeil) feil.push("lesing: " + lesefeil.message);
   await Promise.all((mottakere ?? []).map(async (s) => {
     try {
       await webpush.sendNotification(s.abonnement, innhold, { TTL: 900, urgency: "high" });
       sendt++;
     } catch (e) {
+      feil.push(`${e?.statusCode ?? ""} ${e?.body ?? e?.message ?? e}`.slice(0, 300));
       // Utgått abonnement: fjern det
       if (e?.statusCode === 404 || e?.statusCode === 410) {
         await db.from("jakt_push").delete().eq("endpoint", s.endpoint);
       }
     }
   }));
-  return new Response(JSON.stringify({ sendt }), { headers: { "Content-Type": "application/json" } });
+  return new Response(JSON.stringify({ sendt, mottakere: (mottakere ?? []).length, feil }), { headers: { "Content-Type": "application/json" } });
 });
