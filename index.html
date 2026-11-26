@@ -166,8 +166,9 @@ const kart = L.map('kart', { zoomControl: false }).setView([60.0, 11.0], 13);
 const topo = L.tileLayer('https://cache.kartverket.no/v1/wmts/1.0.0/topo/default/webmercator/{z}/{y}/{x}.png', {
   maxZoom: 18, attribution: '&copy; Kartverket'
 });
-const flyfoto = L.tileLayer('https://opencache.statkart.no/gatekeeper/gk/gk.open_nib_web_mercator_wmts_v2?SERVICE=WMTS&REQUEST=GetTile&VERSION=1.0.0&LAYER=Nibcache_web_mercator_v2&STYLE=default&FORMAT=image/jpgpng&TILEMATRIXSET=default028mm&TILEMATRIX={z}&TILEROW={y}&TILECOL={x}', {
-  maxZoom: 19, attribution: '&copy; Norge i bilder'
+// Norge i bilder krever innlogging (token), så flyfoto hentes fra Esri World Imagery
+const flyfoto = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
+  maxZoom: 19, maxNativeZoom: 18, attribution: 'Flyfoto &copy; Esri, Maxar, Earthstar Geographics'
 });
 const valgtLag = localStorage.getItem('jakt_kartlag') === 'flyfoto' ? flyfoto : topo;
 valgtLag.addTo(kart);
@@ -362,6 +363,15 @@ async function sendPosisjon(pos, tving) {
 }
 
 function startPosisjon() {
+  // For testing på PC: ?testpos=62.06,8.45 gir en fast posisjon
+  const testpos = new URLSearchParams(location.search).get('testpos');
+  if (testpos) {
+    const [lat, lng] = testpos.split(',').map(Number);
+    minPos = { lat, lng, acc: 10 };
+    oppdaterRinger(); kart.setView([lat, lng], 17); førsteVisning = false;
+    sendPosisjon(minPos, true);
+    return;
+  }
   if (!navigator.geolocation) { settStatus('Telefonen støtter ikke posisjon'); return; }
   navigator.geolocation.watchPosition(p => {
     minPos = { lat: p.coords.latitude, lng: p.coords.longitude, acc: Math.round(p.coords.accuracy) };
