@@ -1,0 +1,228 @@
+<!DOCTYPE html>
+<html lang="no">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<meta name="theme-color" content="#2f3b2a">
+<title>Jaktlaget</title>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+<style>
+  html, body { margin: 0; height: 100%; font-family: -apple-system, system-ui, sans-serif; }
+  #kart { position: absolute; inset: 0 0 64px 0; }
+  #meny {
+    position: absolute; left: 0; right: 0; bottom: 0; height: 64px;
+    display: flex; gap: 6px; padding: 8px; box-sizing: border-box;
+    background: #2f3b2a; padding-bottom: max(8px, env(safe-area-inset-bottom));
+  }
+  #meny button {
+    flex: 1; border: 0; border-radius: 8px; font-size: 13px; font-weight: 600;
+    background: #4a5a40; color: #fff;
+  }
+  #meny button.på { background: #e07a1f; }
+  #status {
+    position: absolute; top: 10px; left: 50%; transform: translateX(-50%); z-index: 1000;
+    background: rgba(0,0,0,.7); color: #fff; padding: 6px 12px; border-radius: 16px;
+    font-size: 13px; white-space: nowrap;
+  }
+  .jeger { background: none; border: 0; }
+  .jeger .prikk {
+    width: 16px; height: 16px; border-radius: 50%; border: 3px solid #fff;
+    background: #e07a1f; box-shadow: 0 0 4px rgba(0,0,0,.6); margin: 0 auto;
+  }
+  .jeger.meg .prikk { background: #1f6fe0; }
+  .jeger.gammel .prikk { background: #888; }
+  .jeger .navn {
+    margin-top: 2px; text-align: center; font-size: 12px; font-weight: 700; color: #000;
+    text-shadow: 0 0 3px #fff, 0 0 3px #fff, 0 0 3px #fff; white-space: nowrap;
+  }
+  .jeger .tid { font-weight: 400; }
+</style>
+</head>
+<body>
+<div id="kart"></div>
+<div id="status">Starter …</div>
+<div id="meny">
+  <button id="btnMeg">Meg</button>
+  <button id="btnAlle">Alle</button>
+  <button id="btnSkjerm">Skjerm på</button>
+  <button id="btnStopp">Stopp deling</button>
+</div>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script>
+// ===== Oppsett (Supabase-prosjektet hytteboka) =====
+const SUPABASE_URL = 'https://hmutcnvixydixymfldut.supabase.co';
+const SUPABASE_ANON_KEY = 'sb_publishable_kMmJIYAILLcjAzP2NtYZ9w_vEPYuAor';
+const TABELL = 'jakt_posisjoner';
+// ===================================================
+
+const SEND_MINST_HVER_MS = 15000;   // send ikke oftere enn hvert 15. sekund ...
+const SEND_VED_FLYTT_M = 15;        // ... med mindre man har flyttet seg mer enn 15 m
+const GAMMEL_ETTER_MIN = 10;        // grå prikk etter 10 min uten oppdatering
+const VIS_SISTE_TIMER = 12;         // eldre posisjoner vises ikke
+
+const db = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+const lag = new URLSearchParams(location.search).get('lag') || 'jaktlaget';
+
+// Egen id og navn lagres på telefonen
+let minId = localStorage.getItem('jakt_id');
+if (!minId) { minId = crypto.randomUUID(); localStorage.setItem('jakt_id', minId); }
+let mittNavn = localStorage.getItem('jakt_navn');
+while (!mittNavn) {
+  mittNavn = (prompt('Hva heter du? (vises for resten av laget)') || '').trim();
+  if (mittNavn) localStorage.setItem('jakt_navn', mittNavn);
+}
+
+// Kart: Kartverket topo
+const kart = L.map('kart', { zoomControl: false }).setView([60.0, 11.0], 13);
+L.tileLayer('https://cache.kartverket.no/v1/wmts/1.0.0/topo/default/webmercator/{z}/{y}/{x}.png', {
+  maxZoom: 18, attribution: '&copy; Kartverket'
+}).addTo(kart);
+
+const statusEl = document.getElementById('status');
+const settStatus = t => statusEl.textContent = t;
+
+const jegere = {};   // id -> { data, markør }
+let minPos = null, sistSendt = null, sistSendtTid = 0, deler = true, førsteVisning = true;
+let nøyaktighetSirkel = null;
+
+function minutterSiden(ts) { return Math.floor((Date.now() - new Date(ts).getTime()) / 60000); }
+function tidTekst(ts) {
+  const m = minutterSiden(ts);
+  if (m < 1) return 'nå';
+  if (m < 60) return m + ' min';
+  return Math.floor(m / 60) + ' t ' + (m % 60) + ' min';
+}
+function escape(s) { return String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+
+function ikon(d) {
+  const klasser = ['jeger'];
+  if (d.id === minId) klasser.push('meg');
+  if (minutterSiden(d.oppdatert) >= GAMMEL_ETTER_MIN) klasser.push('gammel');
+  return L.divIcon({
+    className: klasser.join(' '), iconSize: [120, 40], iconAnchor: [60, 8],
+    html: `<div class="prikk"></div><div class="navn">${escape(d.navn)} <span class="tid">${tidTekst(d.oppdatert)}</span></div>`
+  });
+}
+
+function visJeger(d) {
+  if (!d || d.lag !== lag) return;
+  const finnes = jegere[d.id];
+  if (finnes) {
+    finnes.data = d;
+    finnes.markør.setLatLng([d.lat, d.lng]).setIcon(ikon(d));
+  } else {
+    const m = L.marker([d.lat, d.lng], { icon: ikon(d) }).addTo(kart);
+    jegere[d.id] = { data: d, markør: m };
+  }
+}
+function fjernJeger(id) {
+  if (jegere[id]) { kart.removeLayer(jegere[id].markør); delete jegere[id]; }
+}
+function oppdaterTider() {
+  Object.values(jegere).forEach(j => j.markør.setIcon(ikon(j.data)));
+  const andre = Object.keys(jegere).filter(id => id !== minId).length;
+  settStatus(`${lag} · ${andre} andre${deler ? '' : ' · deler ikke'}`);
+}
+function visAlle() {
+  const pkt = Object.values(jegere).map(j => [j.data.lat, j.data.lng]);
+  if (pkt.length) kart.fitBounds(pkt, { padding: [50, 50], maxZoom: 16 });
+}
+
+async function hentAlle() {
+  const fra = new Date(Date.now() - VIS_SISTE_TIMER * 3600000).toISOString();
+  const { data, error } = await db.from(TABELL).select('*').eq('lag', lag).gte('oppdatert', fra);
+  if (error) { settStatus('Feil ved henting: ' + error.message); return; }
+  data.forEach(visJeger);
+  oppdaterTider();
+  if (førsteVisning && data.length) { visAlle(); førsteVisning = false; }
+}
+
+function lyttPåEndringer() {
+  db.channel('jakt-' + lag)
+    .on('postgres_changes', { event: '*', schema: 'public', table: TABELL, filter: `lag=eq.${lag}` }, p => {
+      if (p.eventType === 'DELETE') fjernJeger(p.old.id);
+      else visJeger(p.new);
+      oppdaterTider();
+    })
+    .subscribe(s => { if (s === 'SUBSCRIBED') hentAlle(); });
+}
+
+function avstand(a, b) { return kart.distance([a.lat, a.lng], [b.lat, b.lng]); }
+
+async function sendPosisjon(pos, tving) {
+  if (!deler) return;
+  const nå = Date.now();
+  const flyttet = sistSendt ? avstand(pos, sistSendt) : Infinity;
+  if (!tving && nå - sistSendtTid < SEND_MINST_HVER_MS && flyttet < SEND_VED_FLYTT_M) return;
+  sistSendtTid = nå; sistSendt = pos;
+  const rad = { id: minId, lag, navn: mittNavn, lat: pos.lat, lng: pos.lng,
+                noyaktighet: pos.acc, oppdatert: new Date().toISOString() };
+  visJeger(rad);
+  const { error } = await db.from(TABELL).upsert(rad);
+  if (error) settStatus('Fikk ikke sendt: ' + error.message);
+}
+
+function startPosisjon() {
+  if (!navigator.geolocation) { settStatus('Telefonen støtter ikke posisjon'); return; }
+  navigator.geolocation.watchPosition(p => {
+    minPos = { lat: p.coords.latitude, lng: p.coords.longitude, acc: Math.round(p.coords.accuracy) };
+    if (nøyaktighetSirkel) nøyaktighetSirkel.setLatLng([minPos.lat, minPos.lng]).setRadius(minPos.acc);
+    else nøyaktighetSirkel = L.circle([minPos.lat, minPos.lng], { radius: minPos.acc, weight: 1, color: '#1f6fe0', fillOpacity: .1 }).addTo(kart);
+    if (førsteVisning) { kart.setView([minPos.lat, minPos.lng], 15); førsteVisning = false; }
+    sendPosisjon(minPos, false);
+  }, e => settStatus('Posisjon: ' + e.message), { enableHighAccuracy: true, maximumAge: 5000, timeout: 30000 });
+}
+
+// Send med en gang når telefonen tas opp igjen
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'visible') {
+    hentAlle();
+    if (minPos) sendPosisjon(minPos, true);
+    if (wakeLock === 'ønsket') slåPåSkjerm();
+  }
+});
+
+// Knapper
+document.getElementById('btnMeg').onclick = () => { if (minPos) kart.setView([minPos.lat, minPos.lng], 16); };
+document.getElementById('btnAlle').onclick = visAlle;
+
+let wakeLock = null;
+const btnSkjerm = document.getElementById('btnSkjerm');
+async function slåPåSkjerm() {
+  try {
+    const l = await navigator.wakeLock.request('screen');
+    wakeLock = l; btnSkjerm.classList.add('på');
+    l.addEventListener('release', () => { if (wakeLock === l) wakeLock = 'ønsket'; });
+  } catch (e) { settStatus('Kan ikke holde skjermen på'); }
+}
+btnSkjerm.onclick = async () => {
+  if (wakeLock) {
+    if (wakeLock !== 'ønsket') await wakeLock.release();
+    wakeLock = null; btnSkjerm.classList.remove('på');
+  } else if ('wakeLock' in navigator) slåPåSkjerm();
+  else settStatus('Telefonen støtter ikke dette');
+};
+
+const btnStopp = document.getElementById('btnStopp');
+btnStopp.onclick = async () => {
+  if (deler) {
+    deler = false;
+    await db.from(TABELL).delete().eq('id', minId);
+    fjernJeger(minId);
+    btnStopp.textContent = 'Start deling'; btnStopp.classList.add('på');
+  } else {
+    deler = true;
+    btnStopp.textContent = 'Stopp deling'; btnStopp.classList.remove('på');
+    if (minPos) sendPosisjon(minPos, true);
+  }
+  oppdaterTider();
+};
+
+setInterval(oppdaterTider, 30000);
+lyttPåEndringer();
+startPosisjon();
+</script>
+</body>
+</html>
