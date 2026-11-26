@@ -532,7 +532,7 @@ async function hentVind(tving) {
   const sted = minPos || (grenseLag && (() => { const c = grenseLag.getBounds().getCenter(); return { lat: c.lat, lng: c.lng }; })()) || null;
   if (!sted) return;
   const flyttet = vindHentetFor ? kart.distance([sted.lat, sted.lng], [vindHentetFor.lat, vindHentetFor.lng]) : Infinity;
-  if (!tving && flyttet < 2000 && Date.now() - vindHentetTid < 15 * 60000) { tegnKjegle(); return; }
+  if (!tving && flyttet < 2000 && Date.now() - vindHentetTid < 5 * 60000) { tegnKjegle(); return; }
   if (vindHenter) { tegnKjegle(); return; }
   vindHenter = true;
   try {
@@ -571,7 +571,7 @@ const VindKnapp = L.Control.extend({
   }
 });
 kart.addControl(new VindKnapp());
-setInterval(() => hentVind(true), 20 * 60000);
+setInterval(() => hentVind(true), 5 * 60000);   // hvert 5. minutt
 
 async function hentLag() {
   let data = null;
