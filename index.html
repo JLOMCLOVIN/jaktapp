@@ -70,6 +70,47 @@
   #status { top: max(10px, env(safe-area-inset-top)); }
   #status::after { content: ' ▾'; opacity: .7; }
 
+  /* Hund og uttak */
+  #handlinger { position: absolute; right: 10px; bottom: 26px; z-index: 1050; display: flex; flex-direction: column; gap: 10px; }
+  #handlinger button {
+    width: 58px; height: 58px; border-radius: 50%; border: 0; box-shadow: 0 2px 6px rgba(0,0,0,.4);
+    font-size: 12px; font-weight: 700; color: #fff; font-family: inherit; touch-action: manipulation; line-height: 1.1;
+  }
+  #btnHund { background: #8a5a2b; }
+  #btnUttak { background: #b3261e; }
+  #ark {
+    position: absolute; left: 0; right: 0; bottom: 0; z-index: 1120; background: #fff;
+    border-radius: 14px 14px 0 0; box-shadow: 0 -4px 16px rgba(0,0,0,.3); padding: 14px 14px 10px; display: none;
+  }
+  #ark.åpen { display: block; }
+  #ark h3 { margin: 0 0 10px; font-size: 16px; }
+  #ark button {
+    display: block; width: 100%; margin: 0 0 8px; padding: 13px; border: 0; border-radius: 8px;
+    font-size: 16px; font-weight: 600; background: #eef0ea; color: #222; font-family: inherit; text-align: left;
+  }
+  #ark button.hoved { background: #8a5a2b; color: #fff; }
+  #ark button.avbryt { background: none; text-align: center; color: #666; }
+  #velgPunkt {
+    position: absolute; left: 10px; right: 10px; top: max(54px, calc(env(safe-area-inset-top) + 44px)); z-index: 1130;
+    background: #222; color: #fff; border-radius: 10px; padding: 10px 12px; font-size: 14px; font-weight: 600;
+    display: none; align-items: center; gap: 10px;
+  }
+  #velgPunkt button { margin-left: auto; border: 0; border-radius: 6px; padding: 6px 10px; background: #555; color: #fff; font-family: inherit; }
+  .hundikon { background: none; border: 0; }
+  .hundikon .merke2 {
+    width: 30px; height: 30px; border-radius: 50%; background: #8a5a2b; border: 3px solid #fff; margin: 0 auto;
+    box-shadow: 0 0 4px rgba(0,0,0,.6); font-size: 17px; line-height: 30px; text-align: center;
+  }
+  .hundikon .navn, .uttakikon .navn {
+    margin-top: 2px; text-align: center; font-size: 12px; font-weight: 700; color: #000; white-space: nowrap;
+    text-shadow: 0 0 3px #fff, 0 0 3px #fff, 0 0 3px #fff;
+  }
+  .uttakikon { background: none; border: 0; }
+  .uttakikon .merke2 {
+    width: 26px; height: 26px; border-radius: 50%; background: #b3261e; border: 3px solid #fff; margin: 0 auto;
+    box-shadow: 0 0 4px rgba(0,0,0,.6); color: #fff; font-size: 16px; font-weight: 800; line-height: 26px; text-align: center;
+  }
+
   /* Lagmeny */
   #laget {
     position: absolute; left: 0; right: 0; top: 0; bottom: 0; z-index: 1150;
@@ -152,6 +193,12 @@
       <button type="submit">Send</button>
     </form>
   </div>
+  <div id="handlinger">
+    <button id="btnHund">Hund</button>
+    <button id="btnUttak">Uttak</button>
+  </div>
+  <div id="velgPunkt"><span id="velgTekst">Trykk i kartet</span><button id="btnAvbrytPunkt">Avbryt</button></div>
+  <div id="ark"></div>
   <div id="laget">
     <h2><span id="lagTittel">Jaktlaget</span><button id="btnLukkLaget" aria-label="Lukk">×</button></h2>
     <div class="lagknapper">
@@ -374,6 +421,7 @@ function fjernJeger(id) {
 }
 function oppdaterTider() {
   Object.values(jegere).forEach(j => j.markør.setIcon(ikon(j.data)));
+  if (typeof oppdaterHunder === 'function') oppdaterHunder();
   const andre = Object.keys(jegere).filter(id => id !== minId).length;
   settStatus(`${lagNavn} · ${andre} andre${deler ? '' : ' · deler ikke'}`);
 }
@@ -579,6 +627,146 @@ document.getElementById('chatSkjema').onsubmit = async e => {
   visMelding(data, false);
 };
 
+
+// ----- Hund og uttak -----
+const hunder = {};      // hundenavn -> { data, markør }
+const uttak = {};       // id -> markør
+const VIS_UTTAK_DAGER = 3;
+const arkEl = document.getElementById('ark');
+const velgEl = document.getElementById('velgPunkt');
+let velgHandler = null;
+
+function lukkArk() { arkEl.classList.remove('åpen'); }
+function visArk(html) { chatEl.classList.remove('åpen'); arkEl.innerHTML = html; arkEl.classList.add('åpen'); }
+function velgPunkt(tekst, ferdig) {
+  lukkArk();
+  document.getElementById('velgTekst').textContent = tekst;
+  velgEl.style.display = 'flex';
+  if (velgHandler) kart.off('click', velgHandler);
+  velgHandler = e => { avbrytVelg(); ferdig(e.latlng); };
+  kart.on('click', velgHandler);
+}
+function avbrytVelg() {
+  velgEl.style.display = 'none';
+  if (velgHandler) { kart.off('click', velgHandler); velgHandler = null; }
+}
+document.getElementById('btnAvbrytPunkt').onclick = avbrytVelg;
+
+function hundPos(d) {
+  const j = d.hos_medlem && jegere[d.hos_medlem];
+  if (j) return [j.data.lat, j.data.lng];
+  if (d.hos_medlem === minId && minPos) return [minPos.lat, minPos.lng];
+  return d.lat != null ? [d.lat, d.lng] : null;
+}
+function hundIkon(d) {
+  let hos = '';
+  if (d.hos_medlem) {
+    const j = jegere[d.hos_medlem];
+    hos = ' · hos ' + (d.hos_medlem === minId ? 'deg' : escape(j ? j.data.navn : d.satt_av));
+  } else hos = ' · ' + tidTekst(d.oppdatert);
+  return L.divIcon({ className: 'hundikon', iconSize: [160, 50], iconAnchor: [80, 18],
+    html: `<div class="merke2">🐕</div><div class="navn">${escape(d.hund)}${hos}</div>` });
+}
+function visHund(d) {
+  if (!d || d.lag !== lag) return;
+  const pos = hundPos(d);
+  const finnes = hunder[d.hund];
+  if (!pos) { if (finnes) { kart.removeLayer(finnes.markør); delete hunder[d.hund]; } return; }
+  if (finnes) { finnes.data = d; finnes.markør.setLatLng(pos).setIcon(hundIkon(d)); }
+  else hunder[d.hund] = { data: d, markør: L.marker(pos, { icon: hundIkon(d), zIndexOffset: 500 }).addTo(kart) };
+}
+function fjernHund(navn) { if (hunder[navn]) { kart.removeLayer(hunder[navn].markør); delete hunder[navn]; } }
+function oppdaterHunder() { Object.values(hunder).forEach(h => visHund(h.data)); }
+async function hentHunder() {
+  const { data } = await db.from('jakt_hunder').select('*').eq('lag', lag);
+  (data || []).forEach(visHund);
+}
+
+function velgHundenavn() {
+  const navn = Object.keys(hunder);
+  const sist = localStorage.getItem('jakt_hund') || navn[0] || 'Hunden';
+  const svar = (prompt('Hvilken hund?' + (navn.length ? ' (på kartet nå: ' + navn.join(', ') + ')' : ''), sist) || '').trim();
+  if (svar) localStorage.setItem('jakt_hund', svar);
+  return svar;
+}
+async function lagreHund(rad) {
+  const { error } = await db.from('jakt_hunder').upsert({ lag, satt_av: mittNavn, oppdatert: new Date().toISOString(), ...rad });
+  if (error) settStatus('Fikk ikke lagret hunden: ' + error.message);
+  else visHund({ lag, satt_av: mittNavn, oppdatert: new Date().toISOString(), ...rad });
+}
+
+document.getElementById('btnHund').onclick = () => {
+  const navn = Object.keys(hunder);
+  visArk(`<h3>Hund</h3>
+    <button class="hoved" id="arkHer">Hunden er her (trykk i kartet)</button>
+    <button id="arkHosMeg">Hunden er hos meg</button>
+    ${navn.length ? '<button id="arkFjern">Fjern hund fra kartet</button>' : ''}
+    <button class="avbryt" id="arkAvbryt">Avbryt</button>`);
+  document.getElementById('arkAvbryt').onclick = lukkArk;
+  document.getElementById('arkHer').onclick = () => {
+    const hund = velgHundenavn(); if (!hund) return;
+    velgPunkt('Trykk i kartet der ' + hund + ' er', p => lagreHund({ hund, lat: p.lat, lng: p.lng, hos_medlem: null }));
+  };
+  document.getElementById('arkHosMeg').onclick = () => {
+    const hund = velgHundenavn(); if (!hund) return;
+    lukkArk();
+    lagreHund({ hund, hos_medlem: minId, lat: minPos ? minPos.lat : null, lng: minPos ? minPos.lng : null });
+  };
+  const f = document.getElementById('arkFjern');
+  if (f) f.onclick = async () => {
+    const hund = navn.length === 1 ? navn[0] : velgHundenavn(); if (!hund) return;
+    lukkArk();
+    await db.from('jakt_hunder').delete().eq('lag', lag).eq('hund', hund);
+    fjernHund(hund);
+  };
+};
+
+function uttakIkon(h) {
+  const t = new Date(h.tid).toLocaleTimeString('no', { hour: '2-digit', minute: '2-digit' });
+  return L.divIcon({ className: 'uttakikon', iconSize: [160, 46], iconAnchor: [80, 16],
+    html: `<div class="merke2">✕</div><div class="navn">Uttak ${t}${h.notat ? ' · ' + escape(h.notat) : ''}</div>` });
+}
+function visUttak(h) {
+  if (!h || h.lag !== lag || uttak[h.id]) return;
+  const m = L.marker([h.lat, h.lng], { icon: uttakIkon(h), zIndexOffset: 400 }).addTo(kart);
+  const dato = new Date(h.tid).toLocaleString('no', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
+  m.bindPopup(`<b>Uttak</b><br>${escape(h.notat || '')}${h.notat ? '<br>' : ''}Registrert av ${escape(h.navn)}, ${dato}<br><a href="#" data-slett="${h.id}">Slett markøren</a>`);
+  m.on('popupopen', e => {
+    const a = e.popup.getElement().querySelector('[data-slett]');
+    if (a) a.onclick = async ev => {
+      ev.preventDefault();
+      if (!confirm('Slette uttaket?')) return;
+      await db.from('jakt_hendelser').delete().eq('id', h.id);
+      fjernUttak(h.id);
+    };
+  });
+  uttak[h.id] = m;
+}
+function fjernUttak(id) { if (uttak[id]) { kart.removeLayer(uttak[id]); delete uttak[id]; } }
+async function hentUttak() {
+  const fra = new Date(Date.now() - VIS_UTTAK_DAGER * 86400000).toISOString();
+  const { data } = await db.from('jakt_hendelser').select('*').eq('lag', lag).gte('tid', fra);
+  (data || []).forEach(visUttak);
+}
+document.getElementById('btnUttak').onclick = () => {
+  visArk(`<h3>Uttak</h3>
+    <button class="hoved" id="arkUttakKart" style="background:#b3261e">Marker i kartet</button>
+    <button id="arkUttakHer">Der jeg står</button>
+    <button class="avbryt" id="arkAvbryt">Avbryt</button>`);
+  document.getElementById('arkAvbryt').onclick = lukkArk;
+  const lagre = async p => {
+    const notat = (prompt('Hva ble felt? (valgfritt, f.eks. okse 3 år)') || '').trim() || null;
+    const { data, error } = await db.from('jakt_hendelser').insert({ lag, type: 'uttak', lat: p.lat, lng: p.lng, navn: mittNavn, notat }).select().single();
+    if (error) settStatus('Fikk ikke lagret uttaket: ' + error.message); else visUttak(data);
+  };
+  document.getElementById('arkUttakKart').onclick = () => velgPunkt('Trykk i kartet der dyret ligger', lagre);
+  document.getElementById('arkUttakHer').onclick = () => {
+    lukkArk();
+    if (!minPos) { settStatus('Venter på posisjon …'); setTimeout(oppdaterTider, 2500); return; }
+    lagre({ lat: minPos.lat, lng: minPos.lng });
+  };
+};
+
 // ----- Sanntid -----
 function lyttPåEndringer() {
   db.channel('jakt-' + lag)
@@ -588,7 +776,13 @@ function lyttPåEndringer() {
       oppdaterTider();
     })
     .on('postgres_changes', { event: 'INSERT', schema: 'public', table: MELDINGER, filter: `lag=eq.${lag}` }, p => visMelding(p.new, true))
-    .subscribe(s => { if (s === 'SUBSCRIBED') { hentAlle(); hentMeldinger(); } });
+    .on('postgres_changes', { event: '*', schema: 'public', table: 'jakt_hunder', filter: `lag=eq.${lag}` }, p => {
+      if (p.eventType === 'DELETE') fjernHund(p.old.hund); else visHund(p.new);
+    })
+    .on('postgres_changes', { event: '*', schema: 'public', table: 'jakt_hendelser', filter: `lag=eq.${lag}` }, p => {
+      if (p.eventType === 'DELETE') fjernUttak(p.old.id); else visUttak(p.new);
+    })
+    .subscribe(s => { if (s === 'SUBSCRIBED') { hentAlle(); hentMeldinger(); hentHunder(); hentUttak(); } });
 }
 
 function avstand(a, b) { return kart.distance([a.lat, a.lng], [b.lat, b.lng]); }
@@ -621,7 +815,7 @@ function startPosisjon() {
     minPos = { lat: p.coords.latitude, lng: p.coords.longitude, acc: Math.round(p.coords.accuracy) };
     if (nøyaktighetSirkel) nøyaktighetSirkel.setLatLng([minPos.lat, minPos.lng]).setRadius(minPos.acc);
     else nøyaktighetSirkel = L.circle([minPos.lat, minPos.lng], { radius: minPos.acc, weight: 1, color: '#1f6fe0', fillOpacity: .1, interactive: false }).addTo(kart);
-    oppdaterRinger(); hentVind(false);
+    oppdaterRinger(); hentVind(false); oppdaterHunder();
     if (førsteVisning) { kart.setView([minPos.lat, minPos.lng], 16); førsteVisning = false; }
     sendPosisjon(minPos, false);
   }, e => settStatus('Posisjon: ' + e.message), { enableHighAccuracy: true, maximumAge: 5000, timeout: 30000 });
@@ -630,7 +824,7 @@ function startPosisjon() {
 // Send med en gang når telefonen tas opp igjen
 document.addEventListener('visibilitychange', () => {
   if (document.visibilityState === 'visible') {
-    hentAlle(); hentMeldinger(); meldInn();
+    hentAlle(); hentMeldinger(); meldInn(); hentHunder(); hentUttak();
     if (minPos) sendPosisjon(minPos, true);
     if (wakeLock === 'ønsket') slåPåSkjerm();
   }

@@ -101,3 +101,44 @@ create policy "jakt_medlemmer endring"    on public.jakt_medlemmer for update to
 create policy "jakt_medlemmer utmelding"  on public.jakt_medlemmer for delete to anon, authenticated using (true);
 grant select, insert, update, delete on public.jakt_medlemmer to anon, authenticated;
 notify pgrst, 'reload schema';
+
+-- ===== Versjon 4: hunder og uttak =====
+create table if not exists public.jakt_hunder (
+  lag        text not null,
+  hund       text not null,
+  lat        double precision,
+  lng        double precision,
+  hos_medlem uuid,                 -- satt når hunden følger en jeger
+  satt_av    text not null,
+  oppdatert  timestamptz not null default now(),
+  primary key (lag, hund)
+);
+create table if not exists public.jakt_hendelser (
+  id        bigint generated always as identity primary key,
+  lag       text not null,
+  type      text not null default 'uttak',
+  lat       double precision not null,
+  lng       double precision not null,
+  navn      text not null,
+  notat     text,
+  tid       timestamptz not null default now()
+);
+create index if not exists jakt_hendelser_lag_idx on public.jakt_hendelser (lag, tid desc);
+alter table public.jakt_hunder enable row level security;
+alter table public.jakt_hendelser enable row level security;
+drop policy if exists "jakt_hunder alt" on public.jakt_hunder;
+drop policy if exists "jakt_hendelser alt" on public.jakt_hendelser;
+create policy "jakt_hunder alt"    on public.jakt_hunder    for all to anon, authenticated using (true) with check (true);
+create policy "jakt_hendelser alt" on public.jakt_hendelser for all to anon, authenticated using (true) with check (true);
+grant select, insert, update, delete on public.jakt_hunder, public.jakt_hendelser to anon, authenticated;
+alter table public.jakt_hunder replica identity full;
+alter table public.jakt_hendelser replica identity full;
+do $$ begin
+  if not exists (select 1 from pg_publication_tables where pubname = 'supabase_realtime' and tablename = 'jakt_hunder') then
+    alter publication supabase_realtime add table public.jakt_hunder;
+  end if;
+  if not exists (select 1 from pg_publication_tables where pubname = 'supabase_realtime' and tablename = 'jakt_hendelser') then
+    alter publication supabase_realtime add table public.jakt_hendelser;
+  end if;
+end $$;
+notify pgrst, 'reload schema';
