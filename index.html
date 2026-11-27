@@ -337,8 +337,9 @@ const kart = L.map('kart', { zoomControl: false, zoomSnap: 0.25 }).setView([60.0
     if (nå - sistTrykk < 300 && Math.hypot(t.clientX - sistX, t.clientY - sistY) < 40) {
       e.preventDefault();
       const r = el.getBoundingClientRect();
-      modus = { y0: t.clientY, z0: kart.getZoom(), flyttet: false,
-                punkt: kart.containerPointToLatLng([t.clientX - r.left, t.clientY - r.top]) };
+      const tp = L.point(t.clientX - r.left, t.clientY - r.top);
+      modus = { y0: t.clientY, z0: kart.getZoom(), z: kart.getZoom(), flyttet: false,
+                tp, punkt: kart.containerPointToLatLng(tp), senter: kart.getCenter() };
       kart.dragging.disable();
     }
   }, { passive: false });
@@ -348,8 +349,15 @@ const kart = L.map('kart', { zoomControl: false, zoomSnap: 0.25 }).setView([60.0
     const dy = e.touches[0].clientY - modus.y0;
     if (Math.abs(dy) > 6) modus.flyttet = true;
     if (modus.flyttet) {
-      const z = Math.max(kart.getMinZoom(), Math.min(kart.getMaxZoom(), modus.z0 + dy / 80));
-      kart.setZoomAround(modus.punkt, z, { animate: false });
+      if (!modus.startet) { kart._stop(); kart._moveStart(true, false); modus.startet = true; }
+      modus.z = Math.max(kart.getMinZoom(), Math.min(kart.getMaxZoom(), modus.z0 + dy / 80));
+      // Hold punktet under fingeren i ro mens kartet skaleres
+      const forskyvning = modus.tp.subtract(kart.getSize().divideBy(2));
+      modus.senter = kart.unproject(kart.project(modus.punkt, modus.z).subtract(forskyvning), modus.z);
+      if (!modus.ramme) modus.ramme = requestAnimationFrame(() => {
+        modus.ramme = null;
+        if (modus) kart._move(modus.senter, modus.z, { pinch: true, round: kart.options.zoomSnap });
+      });
     }
   }, { passive: false });
   el.addEventListener('touchend', e => {
@@ -357,6 +365,10 @@ const kart = L.map('kart', { zoomControl: false, zoomSnap: 0.25 }).setView([60.0
     if (modus) {
       e.preventDefault();
       if (!modus.flyttet) kart.setZoomAround(modus.punkt, Math.round(kart.getZoom()) + 1);
+      else if (modus.startet) {
+        if (modus.ramme) cancelAnimationFrame(modus.ramme);
+        kart._animateZoom(modus.senter, kart._limitZoom(modus.z), true, kart.options.zoomSnap);
+      }
       modus = null; sistTrykk = 0;
       kart.dragging.enable();
       return;
@@ -373,11 +385,13 @@ const TOPO_URL = 'https://cache.kartverket.no/v1/wmts/1.0.0/topo/default/webmerc
 const OFFLINE_MAKS_ZOOM = 16;
 // Uten dekning brukes nedlastede kartbiter (til zoom 16), forstørret ved mer innzoom
 const topo = L.tileLayer(TOPO_URL, {
-  maxZoom: 18, maxNativeZoom: navigator.onLine ? 18 : OFFLINE_MAKS_ZOOM, attribution: '&copy; Kartverket'
+  maxZoom: 18, maxNativeZoom: navigator.onLine ? 18 : OFFLINE_MAKS_ZOOM, attribution: '&copy; Kartverket',
+  updateWhenZooming: false, keepBuffer: 4
 });
 // Norge i bilder krever innlogging (token), så flyfoto hentes fra Esri World Imagery
 const flyfoto = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
-  maxZoom: 19, maxNativeZoom: 18, attribution: 'Flyfoto &copy; Esri, Maxar, Earthstar Geographics'
+  maxZoom: 19, maxNativeZoom: 18, attribution: 'Flyfoto &copy; Esri, Maxar, Earthstar Geographics',
+  updateWhenZooming: false, keepBuffer: 4
 });
 const valgtLag = localStorage.getItem('jakt_kartlag') === 'flyfoto' ? flyfoto : topo;
 valgtLag.addTo(kart);
