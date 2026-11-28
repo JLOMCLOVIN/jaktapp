@@ -98,8 +98,8 @@
   #velgPunkt button { margin-left: auto; border: 0; border-radius: 6px; padding: 6px 10px; background: #555; color: #fff; font-family: inherit; }
   .hundikon { background: none; border: 0; }
   .hundikon .merke2 {
-    width: 30px; height: 30px; border-radius: 50%; background: #8a5a2b; border: 3px solid #fff; margin: 0 auto;
-    box-shadow: 0 0 4px rgba(0,0,0,.6); font-size: 17px; line-height: 30px; text-align: center;
+    width: 38px; height: 28px; border-radius: 8px; background: #fff; border: 2px solid #8a5a2b; margin: 0 auto;
+    box-shadow: 0 0 4px rgba(0,0,0,.5); display: flex; align-items: center; justify-content: center;
   }
   .hundikon .navn, .uttakikon .navn {
     margin-top: 2px; text-align: center; font-size: 12px; font-weight: 700; color: #000; white-space: nowrap;
@@ -107,8 +107,8 @@
   }
   .uttakikon { background: none; border: 0; }
   .uttakikon .merke2 {
-    width: 26px; height: 26px; border-radius: 50%; background: #b3261e; border: 3px solid #fff; margin: 0 auto;
-    box-shadow: 0 0 4px rgba(0,0,0,.6); color: #fff; font-size: 16px; font-weight: 800; line-height: 26px; text-align: center;
+    width: 16px; height: 16px; border-radius: 50%; background: #b3261e; border: 2px solid #fff; margin: 0 auto;
+    box-shadow: 0 0 3px rgba(0,0,0,.6); color: #fff; font-size: 11px; font-weight: 800; line-height: 16px; text-align: center;
   }
 
   /* Lagmeny */
@@ -308,7 +308,7 @@ async function visMineLag() {
 }
 
 // Ny versjon lagt ut? Vis en knapp for å oppdatere (en åpen app henter ikke ny kode av seg selv)
-const VERSJON = '2026-11-28c';
+const VERSJON = '2026-11-28d';
 async function sjekkVersjon() {
   try {
     const t = await (await fetch('./index.html?v=' + Date.now(), { cache: 'no-store' })).text();
@@ -768,6 +768,8 @@ document.getElementById('chatSkjema').onsubmit = async e => {
 
 
 // ----- Hund og uttak -----
+// Stilisert jämthund (spisshund med stående ører og krøllhale)
+const JAMTHUND = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 48" width="34" height="26"><g stroke="#2b2925" stroke-width="1.6" stroke-linejoin="round" stroke-linecap="round"><path d="M15 19 C7 18 6 9 12.5 7.5 C17.5 6.5 19.5 11.5 16.5 13.5 C15 11.5 12 11.5 12 13.5 C12.5 16 15.5 17 18.5 17.5 Z" fill="#7a746b"/><path d="M15 18 C20 15.5 33 15.5 41 17 L44 22 L44.5 42 L40.5 42 L40 33 L24 33.5 L22.5 42 L18.5 42 L18.5 32.5 C14.5 30.5 13 25 15 18 Z" fill="#7a746b"/><path d="M40 18 C41 15 42 12 43.5 8.5 L46.5 14 L49 8 L51 14.5 C54.5 15.5 58.5 18 61.5 21.5 C60 23.5 56 24 52.5 24.5 C49.5 26.5 45.5 26 43 23 Z" fill="#7a746b"/></g><path d="M50 21 C53 21.5 57.5 21.5 60.5 21.8 C58.5 23.2 55.5 23.6 52.5 24 C51 24.6 49.5 24 50 21 Z" fill="#e9e3d7"/><path d="M24 32 C30 31.2 35 31.2 40 31.6 L40 33 L24 33.5 Z" fill="#e9e3d7"/><rect x="19.3" y="36" width="2.4" height="5.2" fill="#e9e3d7"/><rect x="41.3" y="36" width="2.4" height="5.2" fill="#e9e3d7"/><circle cx="52.5" cy="18.6" r="1.05" fill="#1a1a1a"/><circle cx="61.3" cy="21.6" r="1.25" fill="#1a1a1a"/></svg>';
 const hunder = {};      // hundenavn -> { data, markør } for hunder med egen markør
 var hundData = {};      // hundenavn -> rad fra databasen
 const uttak = {};       // id -> markør
@@ -809,8 +811,8 @@ function hundIkon(d) {
     const j = jegere[d.hos_medlem];
     hos = ' · hos ' + (d.hos_medlem === minId ? 'deg' : escape(j ? j.data.navn : d.satt_av));
   } else hos = ' · ' + tidTekst(d.oppdatert);
-  return L.divIcon({ className: 'hundikon', iconSize: [80, 50], iconAnchor: [40, 18],
-    html: `<div class="merke2">🐕</div><div class="navn">${tidTekst(d.oppdatert)}</div>` });
+  return L.divIcon({ className: 'hundikon', iconSize: [80, 50], iconAnchor: [40, 16],
+    html: `<div class="merke2">${JAMTHUND}</div><div class="navn">${tidTekst(d.oppdatert)}</div>` });
 }
 function oppdaterJegerikoner() { Object.values(jegere).forEach(j => settIkon(j.markør, ikon(j.data))); }
 function visHund(d) {
@@ -873,8 +875,8 @@ document.getElementById('btnHund').onclick = async () => {
 
 function uttakIkon(h) {
   const t = new Date(h.tid).toLocaleTimeString('no', { hour: '2-digit', minute: '2-digit' });
-  return L.divIcon({ className: 'uttakikon', iconSize: [120, 46], iconAnchor: [60, 16],
-    html: `<div class="merke2">✕</div><div class="navn">Uttak ${t}</div>` });
+  return L.divIcon({ className: 'uttakikon', iconSize: [20, 20], iconAnchor: [10, 10],
+    html: `<div class="merke2" title="Uttak ${t}">✕</div>` });
 }
 // ----- Hundespor: linje mellom meldte hundeposisjoner og uttak i jakta som pågår -----
 const sporPunkter = [];   // { id, tid, lat, lng, type }
