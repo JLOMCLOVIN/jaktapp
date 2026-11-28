@@ -381,6 +381,19 @@ const kart = L.map('kart', { zoomControl: false, zoomSnap: 0.25 }).setView([60.0
   el.addEventListener('touchcancel', () => { if (modus) { modus = null; kart.dragging.enable(); } });
 })();
 window.addEventListener('resize', () => kart.invalidateSize());
+// Tegneflate med stor margin: store sirkler og linjer klippes ikke i kanten og hopper ikke ved zoom
+const fastRender = L.svg({ padding: 1.5 });
+// Sett nytt ikon bare når innholdet faktisk er endret (unngår blinking og hopping)
+function settIkon(markør, ikon) {
+  const nøkkel = ikon.options.className + '|' + ikon.options.html;
+  if (markør._jaktIkon === nøkkel) return;
+  markør._jaktIkon = nøkkel;
+  markør.setIcon(ikon);
+}
+function settPos(markør, ll) {
+  const n = markør.getLatLng();
+  if (!n || Math.abs(n.lat - ll[0]) > 1e-7 || Math.abs(n.lng - ll[1]) > 1e-7) markør.setLatLng(ll);
+}
 const TOPO_URL = 'https://cache.kartverket.no/v1/wmts/1.0.0/topo/default/webmercator/{z}/{y}/{x}.png';
 const OFFLINE_MAKS_ZOOM = 16;
 // Uten dekning brukes nedlastede kartbiter (til zoom 16), forstørret ved mer innzoom
@@ -493,7 +506,7 @@ function visJeger(d) {
   const finnes = jegere[d.id];
   if (finnes) {
     finnes.data = d;
-    finnes.markør.setLatLng([d.lat, d.lng]).setIcon(ikon(d));
+    settPos(finnes.markør, [d.lat, d.lng]); settIkon(finnes.markør, ikon(d));
   } else {
     const m = L.marker([d.lat, d.lng], { icon: ikon(d), zIndexOffset: d.id === minId ? 1000 : 0 }).addTo(kart);
     jegere[d.id] = { data: d, markør: m };
@@ -503,7 +516,7 @@ function fjernJeger(id) {
   if (jegere[id]) { kart.removeLayer(jegere[id].markør); delete jegere[id]; }
 }
 function oppdaterTider() {
-  Object.values(jegere).forEach(j => j.markør.setIcon(ikon(j.data)));
+  Object.values(jegere).forEach(j => settIkon(j.markør, ikon(j.data)));
   if (typeof oppdaterHunder === 'function') oppdaterHunder();
   const andre = Object.keys(jegere).filter(id => id !== minId).length;
   settStatus(`${lagNavn} · ${andre} andre${deler ? '' : ' · deler ikke'}`);
@@ -516,7 +529,7 @@ function visAlle() {
 
 // ----- Avstandsringer rundt egen posisjon -----
 const ringGruppe = L.layerGroup();
-const ringSirkler = RINGER_M.map(r => L.circle([0, 0], { radius: r, color: '#fff', weight: 2, fill: false, interactive: false }));
+const ringSirkler = RINGER_M.map(r => L.circle([0, 0], { radius: r, color: '#fff', weight: 2, fill: false, interactive: false, renderer: fastRender }));
 // Hvite ringer på flyfoto, mørke på topokart
 function ringFarge() {
   const påFlyfoto = kart.hasLayer(flyfoto);
@@ -529,9 +542,13 @@ const ringTekster = RINGER_M.map(r => L.marker([0, 0], { interactive: false, key
 ringSirkler.forEach(c => ringGruppe.addLayer(c));
 ringTekster.forEach(t => ringGruppe.addLayer(t));
 let ringerPå = localStorage.getItem('jakt_ringer') !== 'av';
+let ringSenter = null;
 function oppdaterRinger() {
   if (!minPos) return;
-  RINGER_M.forEach((r, i) => {
+  // Flytt ringene bare når posisjonen har endret seg merkbart (mindre hopping fra GPS-støy)
+  const flyttet = !ringSenter || kart.distance([ringSenter.lat, ringSenter.lng], [minPos.lat, minPos.lng]) > 2;
+  if (flyttet) ringSenter = { lat: minPos.lat, lng: minPos.lng };
+  if (flyttet) RINGER_M.forEach((r, i) => {
     ringSirkler[i].setLatLng([minPos.lat, minPos.lng]);
     ringTekster[i].setLatLng([minPos.lat - r / 111320, minPos.lng]);   // tekst på sørsiden av ringen
   });
@@ -585,7 +602,7 @@ function tegnKjegle() {
   [[1, 0.18], [0.66, 0.18], [0.33, 0.2]].forEach(([andel, opasitet]) => {
     const lengde = L0 * andel, pkt = [[minPos.lat, minPos.lng]];
     for (let v = -KJEGLE_VINKEL; v <= KJEGLE_VINKEL; v += 3) pkt.push(punktFra(minPos.lat, minPos.lng, lengde, medvind + v));
-    kjegleGruppe.addLayer(L.polygon(pkt, { interactive: false, stroke: false, fillColor: '#d7e600', fillOpacity: opasitet }));
+    kjegleGruppe.addLayer(L.polygon(pkt, { interactive: false, stroke: false, fillColor: '#d7e600', fillOpacity: opasitet, renderer: fastRender }));
   });
   if (!kart.hasLayer(kjegleGruppe)) kjegleGruppe.addTo(kart);
 }
@@ -654,7 +671,7 @@ async function hentLag() {
   lagNavn = data.navn || lag;
   document.title = 'Jaktlaget ' + lagNavn;
   if (data.grense) {
-    grenseLag = L.geoJSON(data.grense, { interactive: false,
+    grenseLag = L.geoJSON(data.grense, { interactive: false, renderer: fastRender,
       style: { color: '#ff6a00', weight: 3, fill: true, fillOpacity: 0.04, dashArray: '8 6' } }).addTo(kart);
     if (førsteVisning && !minPos) kart.fitBounds(grenseLag.getBounds(), { padding: [20, 20] });
     if (!minPos) hentVind(false);
@@ -777,7 +794,7 @@ function hundIkon(d) {
   return L.divIcon({ className: 'hundikon', iconSize: [80, 50], iconAnchor: [40, 18],
     html: `<div class="merke2">🐕</div><div class="navn">${tidTekst(d.oppdatert)}</div>` });
 }
-function oppdaterJegerikoner() { Object.values(jegere).forEach(j => j.markør.setIcon(ikon(j.data))); }
+function oppdaterJegerikoner() { Object.values(jegere).forEach(j => settIkon(j.markør, ikon(j.data))); }
 function visHund(d) {
   if (!d || d.lag !== lag) return;
   const før = hundData[d.hund];
@@ -787,7 +804,7 @@ function visHund(d) {
   const pos = (d.hos_medlem && jegere[d.hos_medlem]) ? null : hundPos(d);
   const finnes = hunder[d.hund];
   if (!pos) { if (finnes) { kart.removeLayer(finnes.markør); delete hunder[d.hund]; } return; }
-  if (finnes) { finnes.data = d; finnes.markør.setLatLng(pos).setIcon(hundIkon(d)); }
+  if (finnes) { finnes.data = d; settPos(finnes.markør, pos); settIkon(finnes.markør, hundIkon(d)); }
   else {
     const m = L.marker(pos, { icon: hundIkon(d), zIndexOffset: 500 }).addTo(kart);
     m.bindPopup(() => {
@@ -830,6 +847,8 @@ document.getElementById('btnHund').onclick = async () => {
   if (!minPos) { settStatus('Venter på posisjon …'); setTimeout(oppdaterTider, 2500); return; }
   const [lat, lng] = punktFra(minPos.lat, minPos.lng, 20, 45);
   await lagreHund({ lat, lng, hos_medlem: null });
+  const { data: h } = await db.from('jakt_hendelser').insert({ lag, type: 'hund', lat, lng, navn: mittNavn }).select().single();
+  if (h) leggTilSpor(h);
   settStatus('Hunden er meldt'); setTimeout(oppdaterTider, 2000);
 };
 
@@ -838,10 +857,47 @@ function uttakIkon(h) {
   return L.divIcon({ className: 'uttakikon', iconSize: [120, 46], iconAnchor: [60, 16],
     html: `<div class="merke2">✕</div><div class="navn">Uttak ${t}</div>` });
 }
+// ----- Hundespor: linje mellom meldte hundeposisjoner og uttak i jakta som pågår -----
+const sporPunkter = [];   // { id, tid, lat, lng, type }
+const sporLinje = L.polyline([], { renderer: fastRender, interactive: false, color: '#8a5a2b', weight: 3, opacity: .85, dashArray: '6 6' }).addTo(kart);
+const sporPrikker = L.layerGroup().addTo(kart);
+function sporStart() { return nullstiltTid ? new Date(nullstiltTid) : new Date(Date.now() - 24 * 3600000); }
+function tegnSpor() {
+  sporPunkter.sort((a, b) => new Date(a.tid) - new Date(b.tid));
+  sporLinje.setLatLngs(sporPunkter.map(p => [p.lat, p.lng]));
+  sporPrikker.clearLayers();
+  sporPunkter.forEach(p => {
+    if (p.type !== 'hund') return;   // uttak har egen markør
+    const kl = new Date(p.tid).toLocaleTimeString('no', { hour: '2-digit', minute: '2-digit' });
+    sporPrikker.addLayer(L.circleMarker([p.lat, p.lng], { renderer: fastRender, radius: 4, weight: 1, color: '#fff', fillColor: '#8a5a2b', fillOpacity: 1 })
+      .bindTooltip('Hund ' + kl, { direction: 'top' }));
+  });
+}
+function leggTilSpor(h) {
+  if (!h || h.lag !== lag || (h.type !== 'hund' && h.type !== 'uttak')) return;
+  if (new Date(h.tid) <= sporStart() || sporPunkter.some(p => p.id === h.id)) return;
+  sporPunkter.push({ id: h.id, tid: h.tid, lat: h.lat, lng: h.lng, type: h.type });
+  tegnSpor();
+}
+function fjernSpor(id) {
+  const i = sporPunkter.findIndex(p => String(p.id) === String(id));
+  if (i >= 0) { sporPunkter.splice(i, 1); tegnSpor(); }
+}
+async function hentHundespor() {
+  await hentNullstilt();
+  const { data } = await db.from('jakt_hendelser').select('id, tid, lat, lng, type, lag')
+    .eq('lag', lag).in('type', ['hund', 'uttak']).gt('tid', sporStart().toISOString()).order('tid');
+  sporPunkter.length = 0;
+  (data || []).forEach(h => sporPunkter.push({ id: h.id, tid: h.tid, lat: h.lat, lng: h.lng, type: h.type }));
+  tegnSpor();
+}
+
 function visUttak(h) {
   if (h && h.lag === lag && h.type === 'nullstilt') { tømJakta(h.tid); return; }
+  if (h && h.lag === lag && h.type === 'hund') { leggTilSpor(h); return; }
   if (!h || h.lag !== lag || h.type !== 'uttak' || uttak[h.id]) return;
   if (nullstiltTid && new Date(h.tid) <= new Date(nullstiltTid)) return;
+  leggTilSpor(h);
   const m = L.marker([h.lat, h.lng], { icon: uttakIkon(h), zIndexOffset: 400 }).addTo(kart);
   const dato = new Date(h.tid).toLocaleString('no', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
   m.bindPopup(`<b>Uttak, los i gang</b><br>Registrert av ${escape(h.navn)}, ${dato}<br><a href="#" data-slett="${h.id}">Slett markøren</a>`);
@@ -851,7 +907,7 @@ function visUttak(h) {
       ev.preventDefault();
       if (!confirm('Slette uttaket?')) return;
       await db.from('jakt_hendelser').delete().eq('id', h.id);
-      fjernUttak(h.id);
+      fjernUttak(h.id); fjernSpor(h.id);
     };
   });
   uttak[h.id] = m;
@@ -869,10 +925,11 @@ function tømJakta(tid) {
   meldingerEl.innerHTML = ''; vistMelding.clear(); ulest = 0; ulestEl.textContent = '';
   Object.keys(uttak).forEach(fjernUttak);
   Object.keys(hundData).forEach(fjernHund);
+  sporPunkter.length = 0; tegnSpor();
 }
 document.getElementById('btnNyJakt').onclick = async () => {
   if (!confirm('Starte ny jakt? Chat, uttak og hundeposisjon fra denne jakta fjernes for alle i laget.')) return;
-  await db.from('jakt_hendelser').delete().eq('lag', lag).eq('type', 'uttak');
+  await db.from('jakt_hendelser').delete().eq('lag', lag).in('type', ['uttak', 'hund']);
   await db.from('jakt_hunder').delete().eq('lag', lag);
   const { data, error } = await db.from('jakt_hendelser')
     .insert({ lag, type: 'nullstilt', lat: 0, lng: 0, navn: mittNavn }).select().single();
@@ -1092,9 +1149,9 @@ function lyttPåEndringer() {
       if (p.eventType === 'DELETE') fjernHund(p.old.hund); else visHund(p.new);
     })
     .on('postgres_changes', { event: '*', schema: 'public', table: 'jakt_hendelser', filter: `lag=eq.${lag}` }, p => {
-      if (p.eventType === 'DELETE') fjernUttak(p.old.id); else visUttak(p.new);
+      if (p.eventType === 'DELETE') { fjernUttak(p.old.id); fjernSpor(p.old.id); } else visUttak(p.new);
     })
-    .subscribe(s => { if (s === 'SUBSCRIBED') { hentAlle(); hentMeldinger(); hentHunder(); hentUttak(); } });
+    .subscribe(s => { if (s === 'SUBSCRIBED') { hentAlle(); hentMeldinger(); hentHunder(); hentUttak(); hentHundespor(); } });
 }
 
 function avstand(a, b) { return kart.distance([a.lat, a.lng], [b.lat, b.lng]); }
@@ -1126,7 +1183,7 @@ function startPosisjon() {
   navigator.geolocation.watchPosition(p => {
     minPos = { lat: p.coords.latitude, lng: p.coords.longitude, acc: Math.round(p.coords.accuracy) };
     if (nøyaktighetSirkel) nøyaktighetSirkel.setLatLng([minPos.lat, minPos.lng]).setRadius(minPos.acc);
-    else nøyaktighetSirkel = L.circle([minPos.lat, minPos.lng], { radius: minPos.acc, weight: 1, color: '#1f6fe0', fillOpacity: .1, interactive: false }).addTo(kart);
+    else nøyaktighetSirkel = L.circle([minPos.lat, minPos.lng], { radius: minPos.acc, weight: 1, color: '#1f6fe0', fillOpacity: .1, interactive: false, renderer: fastRender }).addTo(kart);
     oppdaterRinger(); hentVind(false); oppdaterHunder();
     if (førsteVisning) { kart.setView([minPos.lat, minPos.lng], 16); førsteVisning = false; }
     sendPosisjon(minPos, false);
@@ -1136,7 +1193,7 @@ function startPosisjon() {
 // Send med en gang når telefonen tas opp igjen
 document.addEventListener('visibilitychange', () => {
   if (document.visibilityState === 'visible') {
-    hentAlle(); hentMeldinger(); meldInn(); hentHunder(); hentUttak();
+    hentAlle(); hentMeldinger(); meldInn(); hentHunder(); hentUttak(); hentHundespor();
     if (minPos) sendPosisjon(minPos, true);
     if (wakeLock === 'ønsket') slåPåSkjerm();
   }
