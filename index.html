@@ -307,6 +307,24 @@ async function visMineLag() {
   document.getElementById('mineLagBoks').style.display = 'block';
 }
 
+// Ny versjon lagt ut? Vis en knapp for å oppdatere (en åpen app henter ikke ny kode av seg selv)
+const VERSJON = '2026-11-28c';
+async function sjekkVersjon() {
+  try {
+    const t = await (await fetch('./index.html?v=' + Date.now(), { cache: 'no-store' })).text();
+    const m = t.match(/const VERSJON = '([^']+)'/);
+    if (m && m[1] !== VERSJON && !document.getElementById('nyVersjon')) {
+      const b = document.createElement('button');
+      b.id = 'nyVersjon'; b.textContent = 'Ny versjon av appen. Trykk for å oppdatere';
+      b.style.cssText = 'position:fixed;left:10px;right:10px;top:max(10px,env(safe-area-inset-top));z-index:3000;padding:12px;border:0;border-radius:10px;background:#1f6fe0;color:#fff;font-weight:700;font-size:15px';
+      b.onclick = () => location.reload();
+      document.body.appendChild(b);
+    }
+  } catch (e) {}
+}
+setInterval(sjekkVersjon, 5 * 60000);
+document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') sjekkVersjon(); });
+
 // Service worker gjør at siden kan installeres som app
 if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js').catch(() => {});
 
@@ -847,8 +865,9 @@ document.getElementById('btnHund').onclick = async () => {
   if (!minPos) { settStatus('Venter på posisjon …'); setTimeout(oppdaterTider, 2500); return; }
   const [lat, lng] = punktFra(minPos.lat, minPos.lng, 20, 45);
   await lagreHund({ lat, lng, hos_medlem: null });
-  const { data: h } = await db.from('jakt_hendelser').insert({ lag, type: 'hund', lat, lng, navn: mittNavn }).select().single();
-  if (h) leggTilSpor(h);
+  const { data: h, error } = await db.from('jakt_hendelser').insert({ lag, type: 'hund', lat, lng, navn: mittNavn }).select().single();
+  if (error) { settStatus('Hundesporet ble ikke lagret: ' + error.message); return; }
+  leggTilSpor(h);
   settStatus('Hunden er meldt'); setTimeout(oppdaterTider, 2000);
 };
 
