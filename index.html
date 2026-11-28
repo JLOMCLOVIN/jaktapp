@@ -308,7 +308,7 @@ async function visMineLag() {
 }
 
 // Ny versjon lagt ut? Vis en knapp for å oppdatere (en åpen app henter ikke ny kode av seg selv)
-const VERSJON = '2026-11-28f';
+const VERSJON = '2026-11-28g';
 async function sjekkVersjon() {
   try {
     const t = await (await fetch('./index.html?v=' + Date.now(), { cache: 'no-store' })).text();
@@ -869,15 +869,30 @@ async function lagreHund(rad) {
 
 // Ett trykk: hundeføreren har sett hunden like ved seg. Plasseres litt bortenfor (ca. 20 m),
 // så den ikke dekker jegeren, og ligger fast til noen melder hunden på nytt.
-document.getElementById('btnHund').onclick = async () => {
-  lukkArk();
-  if (!minPos) { settStatus('Venter på posisjon …'); setTimeout(oppdaterTider, 2500); return; }
-  const [lat, lng] = punktFra(minPos.lat, minPos.lng, 20, 45);
+// Ett trykk melder hunden like ved deg. Trykk deretter i kartet for å flytte den dit den faktisk er.
+async function meldHund(lat, lng) {
   await lagreHund({ lat, lng, hos_medlem: null });
   const { data: h, error } = await db.from('jakt_hendelser').insert({ lag, type: 'hund', lat, lng, navn: mittNavn }).select().single();
-  if (error) { settStatus('Hundesporet ble ikke lagret: ' + error.message); return; }
+  if (error) { settStatus('Hundesporet ble ikke lagret: ' + error.message); return null; }
   leggTilSpor(h);
-  settStatus('Hunden er meldt'); setTimeout(oppdaterTider, 2000);
+  return h;
+}
+document.getElementById('btnHund').onclick = async () => {
+  lukkArk(); chatEl.classList.remove('åpen');
+  if (!minPos) {
+    // Ingen posisjon ennå: velg stedet i kartet
+    velgPunkt('Trykk i kartet der hunden er', p => meldHund(p.lat, p.lng));
+    return;
+  }
+  const [lat, lng] = punktFra(minPos.lat, minPos.lng, 20, 45);
+  const h = await meldHund(lat, lng);
+  if (!h) return;
+  velgPunkt('Hunden er meldt ved deg. Trykk i kartet for å flytte den', async p => {
+    const { error } = await db.from('jakt_hendelser').update({ lat: p.lat, lng: p.lng }).eq('id', h.id);
+    if (error) { settStatus('Fikk ikke flyttet hunden: ' + error.message); return; }
+    leggTilSpor({ ...h, lat: p.lat, lng: p.lng });
+    await lagreHund({ lat: p.lat, lng: p.lng, hos_medlem: null });
+  }, 'Ferdig', 60);
 };
 
 function uttakIkon(h) {
@@ -909,8 +924,10 @@ function tegnSpor() {
 }
 function leggTilSpor(h) {
   if (!h || h.lag !== lag || (h.type !== 'hund' && h.type !== 'uttak')) return;
-  if (new Date(h.tid) <= sporStart() || sporPunkter.some(p => p.id === h.id)) return;
-  sporPunkter.push({ id: h.id, tid: h.tid, lat: h.lat, lng: h.lng, type: h.type });
+  if (new Date(h.tid) <= sporStart()) return;
+  const finnes = sporPunkter.find(p => String(p.id) === String(h.id));
+  if (finnes) { finnes.lat = h.lat; finnes.lng = h.lng; }
+  else sporPunkter.push({ id: h.id, tid: h.tid, lat: h.lat, lng: h.lng, type: h.type });
   tegnSpor();
 }
 // Slett et punkt i hundesporet. Var det siste punkt, flyttes hundemarkøren til forrige punkt.
