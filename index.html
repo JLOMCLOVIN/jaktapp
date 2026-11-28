@@ -308,7 +308,7 @@ async function visMineLag() {
 }
 
 // Ny versjon lagt ut? Vis en knapp for å oppdatere (en åpen app henter ikke ny kode av seg selv)
-const VERSJON = '2026-11-28e';
+const VERSJON = '2026-11-28f';
 async function sjekkVersjon() {
   try {
     const t = await (await fetch('./index.html?v=' + Date.now(), { cache: 'no-store' })).text();
@@ -831,8 +831,15 @@ function visHund(d) {
       const h = hundData[d.hund] || d;
       const kl = new Date(h.oppdatert).toLocaleTimeString('no', { hour: '2-digit', minute: '2-digit' });
       const div = document.createElement('div');
-      div.innerHTML = `Hunden sett av ${escape(h.satt_av)} kl. ${kl}<br><a href="#">Fjern fra kartet</a>`;
-      div.querySelector('a').onclick = async ev => {
+      div.innerHTML = `Hunden sett av ${escape(h.satt_av)} kl. ${kl}<br><a href="#" data-a="angre">Fjern denne posisjonen</a><br><a href="#" data-a="alt">Fjern hunden fra kartet</a>`;
+      div.querySelector('[data-a=angre]').onclick = async ev => {
+        ev.preventDefault(); kart.closePopup();
+        // Slett siste hundemelding i sporet, og flytt hunden tilbake til forrige punkt
+        const siste = [...sporPunkter].filter(p => p.type === 'hund').pop();
+        if (siste) await slettSporpunkt(siste.id);
+        else { await db.from('jakt_hunder').delete().eq('lag', lag).eq('hund', h.hund); fjernHund(h.hund); }
+      };
+      div.querySelector('[data-a=alt]').onclick = async ev => {
         ev.preventDefault(); kart.closePopup();
         await db.from('jakt_hunder').delete().eq('lag', lag).eq('hund', h.hund);
         fjernHund(h.hund);
@@ -890,8 +897,14 @@ function tegnSpor() {
   sporPunkter.forEach(p => {
     if (p.type !== 'hund') return;   // uttak har egen markør
     const kl = new Date(p.tid).toLocaleTimeString('no', { hour: '2-digit', minute: '2-digit' });
-    sporPrikker.addLayer(L.circleMarker([p.lat, p.lng], { renderer: fastRender, radius: 4, weight: 1, color: '#fff', fillColor: '#8a5a2b', fillOpacity: 1 })
-      .bindTooltip('Hund ' + kl, { direction: 'top' }));
+    const prikk = L.circleMarker([p.lat, p.lng], { renderer: fastRender, radius: 5, weight: 1, color: '#fff', fillColor: '#8a5a2b', fillOpacity: 1 });
+    prikk.bindPopup(() => {
+      const div = document.createElement('div');
+      div.innerHTML = `Hund meldt kl. ${kl}<br><a href="#">Slett punktet</a>`;
+      div.querySelector('a').onclick = async ev => { ev.preventDefault(); kart.closePopup(); await slettSporpunkt(p.id); };
+      return div;
+    });
+    sporPrikker.addLayer(prikk);
   });
 }
 function leggTilSpor(h) {
@@ -899,6 +912,18 @@ function leggTilSpor(h) {
   if (new Date(h.tid) <= sporStart() || sporPunkter.some(p => p.id === h.id)) return;
   sporPunkter.push({ id: h.id, tid: h.tid, lat: h.lat, lng: h.lng, type: h.type });
   tegnSpor();
+}
+// Slett et punkt i hundesporet. Var det siste punkt, flyttes hundemarkøren til forrige punkt.
+async function slettSporpunkt(id) {
+  const varSiste = sporPunkter.length && String(sporPunkter[sporPunkter.length - 1].id) === String(id);
+  const { error } = await db.from('jakt_hendelser').delete().eq('id', id);
+  if (error) { settStatus('Fikk ikke slettet punktet: ' + error.message); return; }
+  fjernSpor(id); fjernUttak(id);
+  if (varSiste) {
+    const forrige = sporPunkter[sporPunkter.length - 1];
+    if (forrige) await lagreHund({ lat: forrige.lat, lng: forrige.lng, hos_medlem: null });
+    else { await db.from('jakt_hunder').delete().eq('lag', lag).eq('hund', HUND); fjernHund(HUND); }
+  }
 }
 function fjernSpor(id) {
   const i = sporPunkter.findIndex(p => String(p.id) === String(id));
