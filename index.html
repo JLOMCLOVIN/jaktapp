@@ -308,7 +308,7 @@ async function visMineLag() {
 }
 
 // Ny versjon lagt ut? Vis en knapp for å oppdatere (en åpen app henter ikke ny kode av seg selv)
-const VERSJON = '2026-11-28g';
+const VERSJON = '2026-11-28h';
 async function sjekkVersjon() {
   try {
     const t = await (await fetch('./index.html?v=' + Date.now(), { cache: 'no-store' })).text();
@@ -640,15 +640,25 @@ async function hentVind(tving) {
   if (vindHenter) { tegnKjegle(); return; }
   vindHenter = true;
   try {
-    const url = `https://api.met.no/weatherapi/locationforecast/2.0/compact?lat=${sted.lat.toFixed(4)}&lon=${sted.lng.toFixed(4)}`;
-    const r = await fetch(url);
-    if (!r.ok) throw new Error('HTTP ' + r.status);
-    const j = await r.json();
-    // Velg tidssteget nærmest nå
+    // Yr/MET: Nowcast (oppdateres hvert 5. minutt, Norden). Reserve: Locationforecast.
+    const pos = `lat=${sted.lat.toFixed(4)}&lon=${sted.lng.toFixed(4)}`;
     const nå = Date.now();
-    const ts = j.properties.timeseries.reduce((a, b) =>
-      Math.abs(new Date(b.time) - nå) < Math.abs(new Date(a.time) - nå) ? b : a);
+    const nærmest = liste => liste.reduce((a, b) => Math.abs(new Date(b.time) - nå) < Math.abs(new Date(a.time) - nå) ? b : a);
+    let ts = null;
+    try {
+      const r = await fetch(`https://api.met.no/weatherapi/nowcast/2.0/complete?${pos}`);
+      if (r.ok) {
+        const t = nærmest((await r.json()).properties.timeseries);
+        if (t.data.instant.details.wind_from_direction != null) ts = t;
+      }
+    } catch (e) { /* bruk reserve */ }
+    if (!ts) {
+      const r = await fetch(`https://api.met.no/weatherapi/locationforecast/2.0/compact?${pos}`);
+      if (!r.ok) throw new Error('HTTP ' + r.status);
+      ts = nærmest((await r.json()).properties.timeseries);
+    }
     const d = ts.data.instant.details;
+    // wind_from_direction = retningen vinden kommer FRA (grader fra nord, med klokka)
     vind = { fra: d.wind_from_direction, fart: d.wind_speed, kast: d.wind_speed_of_gust, tid: ts.time };
     vindHentetFor = sted; vindHentetTid = Date.now();
   } catch (e) {
